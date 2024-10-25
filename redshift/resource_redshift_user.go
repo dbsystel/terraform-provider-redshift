@@ -45,10 +45,10 @@ func redshiftUser() *schema.Resource {
 		Description: `
 Amazon Redshift user accounts can only be created and dropped by a database superuser. Users are authenticated when they login to Amazon Redshift. They can own databases and database objects (for example, tables) and can grant privileges on those objects to users, groups, and schemas to control who has access to which object. Users with CREATE DATABASE rights can create databases and grant privileges to those databases. Superusers have database ownership privileges for all databases.
 `,
-		Create: RedshiftResourceFunc(resourceRedshiftUserCreate),
-		Read:   RedshiftResourceFunc(resourceRedshiftUserRead),
-		Update: RedshiftResourceFunc(resourceRedshiftUserUpdate),
-		Delete: RedshiftResourceFunc(
+		CreateContext: RedshiftResourceFunc(resourceRedshiftUserCreate),
+		ReadContext:   RedshiftResourceFunc(resourceRedshiftUserRead),
+		UpdateContext: RedshiftResourceFunc(resourceRedshiftUserUpdate),
+		DeleteContext: RedshiftResourceFunc(
 			RedshiftResourceRetryOnPQErrors(resourceRedshiftUserDelete),
 		),
 		Exists: RedshiftResourceExistsFunc(resourceRedshiftUserExists),
@@ -274,12 +274,12 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	var userSuperuser, userCreateDB bool
 
 	columns := []string{
-		"usename",
-		"usecreatedb",
-		"usesuper",
-		"syslogaccess",
-		`COALESCE(useconnlimit::TEXT, 'UNLIMITED')`,
-		"sessiontimeout",
+		"user_name",
+		"createdb",
+		"superuser",
+		"syslog_access",
+		`COALESCE(connection_limit::TEXT, 'UNLIMITED')`,
+		"session_timeout",
 	}
 
 	values := []interface{}{
@@ -293,7 +293,7 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 
 	useSysID := d.Id()
 
-	userSQL := fmt.Sprintf("SELECT %s FROM svl_user_info WHERE usesysid = $1", strings.Join(columns, ","))
+	userSQL := fmt.Sprintf("SELECT %s FROM svv_user_info WHERE user_id = $1", strings.Join(columns, ","))
 	err := db.QueryRow(userSQL, useSysID).Scan(values...)
 	switch {
 	case err == sql.ErrNoRows:

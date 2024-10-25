@@ -12,7 +12,7 @@ import (
 
 var (
 	dbRegistryLock sync.Mutex
-	dbRegistry     map[string]*DBConnection = make(map[string]*DBConnection, 1)
+	dbRegistry     = make(map[string]*DBConnection, 1)
 )
 
 // Config - provider config
@@ -24,6 +24,10 @@ type Config struct {
 	Database string
 	SSLMode  string
 	MaxConns int
+
+	serverlessCheckMutex *sync.Mutex
+	isServerless         bool
+	checkedForServerless bool
 }
 
 // Client struct holding connection string
@@ -46,6 +50,34 @@ func (c *Config) NewClient(database string) *Client {
 		config:       *c,
 		databaseName: database,
 	}
+}
+
+func (c *Config) IsServerless(db *DBConnection) (bool, error) {
+	if c.serverlessCheckMutex == nil {
+		c.serverlessCheckMutex = &sync.Mutex{}
+	}
+	c.serverlessCheckMutex.Lock()
+	defer c.serverlessCheckMutex.Unlock()
+	if c.checkedForServerless {
+		return c.isServerless, nil
+	}
+
+	c.checkedForServerless = true
+
+	_, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
+	// No error means we have accessed the view and are running Redshift Serverless
+	if err == nil {
+		c.isServerless = true
+		return true, nil
+	}
+
+	// Insuficcient privileges means we do not have access to this view ergo we run on Redshift classic
+	if isPqErrorWithCode(err, pgErrorCodeInsufficientPrivileges) {
+		c.isServerless = false
+		return false, nil
+	}
+
+	return false, err
 }
 
 // Connect returns a copy to an sql.Open()'ed database connection wrapped in a DBConnection struct.

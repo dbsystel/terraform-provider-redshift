@@ -14,7 +14,7 @@ func dataSourceRedshiftUser() *schema.Resource {
 		Description: `
 This data source can be used to fetch information about a specific database user. Users are authenticated when they login to Amazon Redshift. They can own databases and database objects (for example, tables) and can grant privileges on those objects to users, groups, and schemas to control who has access to which object. Users with CREATE DATABASE rights can create databases and grant privileges to those databases. Superusers have database ownership privileges for all databases.
 `,
-		Read: RedshiftResourceFunc(dataSourceRedshiftUserRead),
+		ReadContext: RedshiftResourceFunc(dataSourceRedshiftUserRead),
 		Schema: map[string]*schema.Schema{
 			userNameAttr: {
 				Type:        schema.TypeString,
@@ -24,7 +24,7 @@ This data source can be used to fetch information about a specific database user
 					"public",
 				}, true),
 				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
+					return val.(string)
 				},
 			},
 			userValidUntilAttr: {
@@ -66,12 +66,12 @@ func dataSourceRedshiftUserRead(db *DBConnection, d *schema.ResourceData) error 
 	var userSuperuser, userCreateDB bool
 
 	columns := []string{
-		"usesysid",
-		"usecreatedb",
-		"usesuper",
-		"syslogaccess",
-		`COALESCE(useconnlimit::TEXT, 'UNLIMITED')`,
-		"sessiontimeout",
+		"user_id",
+		"createdb",
+		"superuser",
+		"syslog_access",
+		`COALESCE(connection_limit::TEXT, 'UNLIMITED')`,
+		"session_timeout",
 	}
 
 	values := []interface{}{
@@ -85,7 +85,7 @@ func dataSourceRedshiftUserRead(db *DBConnection, d *schema.ResourceData) error 
 
 	userName := d.Get(userNameAttr).(string)
 
-	userSQL := fmt.Sprintf("SELECT %s FROM svl_user_info WHERE usename = $1", strings.Join(columns, ","))
+	userSQL := fmt.Sprintf("SELECT %s FROM svv_user_info WHERE user_name = $1", strings.Join(columns, ","))
 	err := db.QueryRow(userSQL, userName).Scan(values...)
 	if err != nil {
 		return err
