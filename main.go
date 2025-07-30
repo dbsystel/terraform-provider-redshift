@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/brainly/terraform-provider-redshift/redshift"
+	"github.com/dbsystel/terraform-provider-redshift/redshift"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/plugin"
 )
