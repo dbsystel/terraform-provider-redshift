@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -50,7 +51,7 @@ func startTransaction(client *Client, database string) (*sql.Tx, error) {
 func deferredRollback(txn *sql.Tx) {
 	err := txn.Rollback()
 	switch {
-	case err == sql.ErrTxDone:
+	case errors.Is(err, sql.ErrTxDone):
 		// transaction has already been committed or rolled back
 		log.Printf("[DEBUG]: %v", err)
 	case err != nil:
@@ -63,8 +64,8 @@ func deferredRollback(txn *sql.Tx) {
 // single quotes in SQL (i.e. fmt.Sprintf(`'%s'`, pqQuoteLiteral("str"))).  See
 // quote_literal_internal() in postgresql/backend/utils/adt/quote.c:77.
 func pqQuoteLiteral(in string) string {
-	in = strings.Replace(in, `\`, `\\`, -1)
-	in = strings.Replace(in, `'`, `''`, -1)
+	in = strings.ReplaceAll(in, `\`, `\\`)
+	in = strings.ReplaceAll(in, `'`, `''`)
 	return in
 }
 
@@ -104,7 +105,8 @@ func RedshiftResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData
 				return nil
 			}
 
-			if pqErr, ok := err.(*pq.Error); !ok || !isRetryablePQError(string(pqErr.Code)) {
+			var pqErr *pq.Error
+			if !errors.As(err, &pqErr) || !isRetryablePQError(string(pqErr.Code)) {
 				return err
 			}
 
@@ -152,7 +154,7 @@ func splitCsvAndTrim(raw string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := []string{}
+	var result []string
 	for _, s := range rawSlice {
 		trimmed := strings.TrimSpace(s)
 		if trimmed != "" {

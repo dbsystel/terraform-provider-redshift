@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -43,7 +44,7 @@ func redshiftDatasharePrivilege() *schema.Resource {
 			if (consumerNamespaceSet && !consumerAccountSet) || (consumerAccountSet && !consumerNamespaceSet) {
 				return nil
 			}
-			return fmt.Errorf("Exactly one of %s or %s must be set", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
+			return fmt.Errorf("exactly one of %s or %s must be set", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
 		},
 		Schema: map[string]*schema.Schema{
 			datasharePrivilegeShareNameAttr: {
@@ -114,7 +115,7 @@ func resourceRedshiftDatasharePrivilegeExists(db *DBConnection, d *schema.Resour
 	if useAccount {
 		return resourceRedshiftDatasharePrivilegeAccountExists(db, shareName, consumerAccountRaw.(string))
 	}
-	return false, fmt.Errorf("Either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
+	return false, fmt.Errorf("either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
 }
 
 func resourceRedshiftDatasharePrivilegeNamespaceExists(db *DBConnection, shareName string, consumerNamespace string) (bool, error) {
@@ -124,7 +125,7 @@ func resourceRedshiftDatasharePrivilegeNamespaceExists(db *DBConnection, shareNa
 	err := db.QueryRow(query, shareName, consumerNamespace).Scan(&shareDate)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -140,7 +141,7 @@ func resourceRedshiftDatasharePrivilegeAccountExists(db *DBConnection, shareName
 	err := db.QueryRow(query, shareName, consumerAccount).Scan(&shareDate)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -159,7 +160,7 @@ func resourceRedshiftDatasharePrivilegeCreate(db *DBConnection, d *schema.Resour
 	} else if consumerAccountSet {
 		query = fmt.Sprintf("%s ACCOUNT '%s'", query, pqQuoteLiteral(consumerAccountRaw.(string)))
 	} else {
-		return fmt.Errorf("Either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
+		return fmt.Errorf("either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
 	}
 	log.Printf("[DEBUG] %s\n", query)
 	if _, err := db.Exec(query); err != nil {
@@ -181,7 +182,7 @@ func resourceRedshiftDatasharePrivilegeRead(db *DBConnection, d *schema.Resource
 		return resourceRedshiftDatasharePrivilegeAccountRead(db, shareName, consumerAccountRaw.(string), d)
 	}
 
-	return fmt.Errorf("Either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
+	return fmt.Errorf("either %s or %s is required", datasharePrivilegeNamespaceAttr, datasharePrivilegeAccountAttr)
 }
 
 func resourceRedshiftDatasharePrivilegeNamespaceRead(db *DBConnection, shareName string, consumerNamespace string, d *schema.ResourceData) error {

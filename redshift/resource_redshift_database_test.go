@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -95,14 +96,6 @@ resource "redshift_user" "user" {
 	})
 }
 
-func testAccResourceRedshiftDatabaseConfig_basic(dbName string) string {
-	return fmt.Sprintf(`
-resource "redshift_database" "db" {
-	%[1]s = %[2]q
-}
-	`, databaseNameAttr, dbName)
-}
-
 func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {
 	client := testAccProvider.Meta().(*Client)
 
@@ -150,7 +143,7 @@ func checkDatabaseExists(client *Client, database string) (bool, error) {
 	var _rez int
 	err = db.QueryRow("SELECT 1 FROM pg_database WHERE datname=$1", strings.ToLower(database)).Scan(&_rez)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about database: %s", err)

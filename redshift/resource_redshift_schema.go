@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -405,7 +406,7 @@ func resourceRedshiftSchemaExists(db *DBConnection, d *schema.ResourceData) (boo
 	err := db.QueryRow("SELECT nspname FROM pg_namespace WHERE oid = $1", d.Id()).Scan(&name)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -438,13 +439,13 @@ func resourceRedshiftSchemaReadImpl(db *DBConnection, d *schema.ResourceData) er
 	}
 	d.Set(schemaNameAttr, schemaName)
 	d.Set(schemaOwnerAttr, schemaOwner)
-	switch {
-	case schemaType == "local":
+	switch schemaType {
+	case "local":
 		return resourceRedshiftSchemaReadLocal(db, d)
-	case schemaType == "external":
+	case "external":
 		return resourceRedshiftSchemaReadExternal(db, d)
 	default:
-		return fmt.Errorf(`Unsupported schema type "%s". Supported types are "local" and "external".`, schemaType)
+		return fmt.Errorf(`unsupported schema type %q: supported types are "local" and "external"`, schemaType)
 	}
 }
 
@@ -470,7 +471,7 @@ func resourceRedshiftSchemaReadLocal(db *DBConnection, d *schema.ResourceData) e
 			WHERE schema_id = $1
 		`, d.Id()).Scan(&schemaQuota)
 	}
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	d.Set(schemaQuotaAttr, schemaQuota)
@@ -510,18 +511,18 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 	externalSchemaConfiguration := make(map[string]interface{})
 	sourceConfiguration := make(map[string]interface{})
 	externalSchemaConfiguration["database_name"] = &sourceDbName
-	switch {
-	case sourceType == "data_catalog_source":
+	switch sourceType {
+	case "data_catalog_source":
 		sourceConfiguration["region"] = &region
 		sourceConfiguration["iam_role_arns"], err = splitCsvAndTrim(iamRole)
 		if err != nil {
-			return fmt.Errorf("Error parsing iam_role_arns: %v", err)
+			return fmt.Errorf("error parsing iam_role_arns: %w", err)
 		}
 		sourceConfiguration["catalog_role_arns"], err = splitCsvAndTrim(catalogRole)
 		if err != nil {
-			return fmt.Errorf("Error parsing catalog_role_arns: %v", err)
+			return fmt.Errorf("error parsing catalog_role_arns: %w", err)
 		}
-	case sourceType == "hive_metastore_source":
+	case "hive_metastore_source":
 		sourceConfiguration["hostname"] = &hostName
 		if port != "" {
 			portNum, err := strconv.Atoi(port)
@@ -532,9 +533,9 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 		}
 		sourceConfiguration["iam_role_arns"], err = splitCsvAndTrim(iamRole)
 		if err != nil {
-			return fmt.Errorf("Error parsing iam_role_arns: %v", err)
+			return fmt.Errorf("error parsing iam_role_arns: %w", err)
 		}
-	case sourceType == "rds_postgres_source":
+	case "rds_postgres_source":
 		sourceConfiguration["hostname"] = &hostName
 		if port != "" {
 			portNum, err := strconv.Atoi(port)
@@ -548,10 +549,10 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 		}
 		sourceConfiguration["iam_role_arns"], err = splitCsvAndTrim(iamRole)
 		if err != nil {
-			return fmt.Errorf("Error parsing iam_role_arns: %v", err)
+			return fmt.Errorf("error parsing iam_role_arns: %w", err)
 		}
 		sourceConfiguration["secret_arn"] = &secretArn
-	case sourceType == "rds_mysql_source":
+	case "rds_mysql_source":
 		sourceConfiguration["hostname"] = &hostName
 		if port != "" {
 			portNum, err := strconv.Atoi(port)
@@ -562,15 +563,15 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 		}
 		sourceConfiguration["iam_role_arns"], err = splitCsvAndTrim(iamRole)
 		if err != nil {
-			return fmt.Errorf("Error parsing iam_role_arns: %v", err)
+			return fmt.Errorf("error parsing iam_role_arns: %w", err)
 		}
 		sourceConfiguration["secret_arn"] = &secretArn
-	case sourceType == "redshift_source":
+	case "redshift_source":
 		if sourceSchema != "" {
 			sourceConfiguration["schema"] = &sourceSchema
 		}
 	default:
-		return fmt.Errorf(`Unsupported source database type %s`, sourceType)
+		return fmt.Errorf(`unsupported source database type: %q`, sourceType)
 	}
 	externalSchemaConfiguration[sourceType] = []map[string]interface{}{sourceConfiguration}
 
@@ -627,7 +628,7 @@ func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) erro
 func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, d *schema.ResourceData) error {
 	schemaName := d.Get(schemaNameAttr).(string)
 	schemaQuota := d.Get(schemaQuotaAttr).(int)
-	createOpts := []string{}
+	var createOpts []string
 
 	if v, ok := d.GetOk(schemaOwnerAttr); ok {
 		createOpts = append(createOpts, fmt.Sprintf("AUTHORIZATION %s", pq.QuoteIdentifier(v.(string))))
@@ -676,7 +677,7 @@ func resourceRedshiftSchemaCreateExternal(tx *sql.Tx, d *schema.ResourceData) er
 		// redshift source
 		configQuery = getRedshiftConfigQueryPart(d, sourceDbName)
 	} else {
-		return fmt.Errorf("Can't create external schema. No source configuration found.")
+		return fmt.Errorf("can't create external schema: no source configuration found")
 	}
 
 	query = fmt.Sprintf("%s %s", query, configQuery)
@@ -710,13 +711,13 @@ func getDataCatalogConfigQueryPart(d *schema.ResourceData, sourceDbName string) 
 		query = fmt.Sprintf("%s REGION '%s'", query, pqQuoteLiteral(region.(string)))
 	}
 	iamRoleArnsRaw := d.Get(fmt.Sprintf("%s.%s", dataCatalogAttr, "iam_role_arns")).([]interface{})
-	iamRoleArns := []string{}
+	var iamRoleArns []string
 	for _, arn := range iamRoleArnsRaw {
 		iamRoleArns = append(iamRoleArns, arn.(string))
 	}
 	query = fmt.Sprintf("%s IAM_ROLE '%s'", query, pqQuoteLiteral(strings.Join(iamRoleArns, ",")))
 	if catalogRoleArnsRaw, hasCatalogRoleArns := d.GetOk(fmt.Sprintf("%s.%s", dataCatalogAttr, "catalog_role_arns")); hasCatalogRoleArns {
-		catalogRoleArns := []string{}
+		var catalogRoleArns []string
 		for _, arn := range catalogRoleArnsRaw.([]interface{}) {
 			catalogRoleArns = append(catalogRoleArns, arn.(string))
 		}
@@ -738,7 +739,7 @@ func getHiveMetastoreConfigQueryPart(d *schema.ResourceData, sourceDbName string
 		query = fmt.Sprintf("%s PORT %d", query, port.(int))
 	}
 	iamRoleArnsRaw := d.Get(fmt.Sprintf("%s.%s", hiveMetastoreAttr, "iam_role_arns")).([]interface{})
-	iamRoleArns := []string{}
+	var iamRoleArns []string
 	for _, arn := range iamRoleArnsRaw {
 		iamRoleArns = append(iamRoleArns, arn.(string))
 	}
@@ -757,7 +758,7 @@ func getRdsPostgresConfigQueryPart(d *schema.ResourceData, sourceDbName string) 
 		query = fmt.Sprintf("%s PORT %d", query, port.(int))
 	}
 	iamRoleArnsRaw := d.Get(fmt.Sprintf("%s.%s", rdsPostgresAttr, "iam_role_arns")).([]interface{})
-	iamRoleArns := []string{}
+	var iamRoleArns []string
 	for _, arn := range iamRoleArnsRaw {
 		iamRoleArns = append(iamRoleArns, arn.(string))
 	}
@@ -775,7 +776,7 @@ func getRdsMysqlConfigQueryPart(d *schema.ResourceData, sourceDbName string) str
 		query = fmt.Sprintf("%s PORT %d", query, port.(int))
 	}
 	iamRoleArnsRaw := d.Get(fmt.Sprintf("%s.%s", rdsMysqlAttr, "iam_role_arns")).([]interface{})
-	iamRoleArns := []string{}
+	var iamRoleArns []string
 	for _, arn := range iamRoleArnsRaw {
 		iamRoleArns = append(iamRoleArns, arn.(string))
 	}
@@ -829,18 +830,18 @@ func setSchemaName(tx *sql.Tx, d *schema.ResourceData) error {
 	newValue := newRaw.(string)
 
 	if newValue == "" {
-		return fmt.Errorf("Error setting schema name to an empty string")
+		return fmt.Errorf("error setting schema name to an empty string")
 	}
 
 	query := fmt.Sprintf("ALTER SCHEMA %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
 	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("Error updating schema NAME: %w", err)
+		return fmt.Errorf("error updating schema NAME: %w", err)
 	}
 
 	return nil
 }
 
-func setSchemaOwner(tx *sql.Tx, db *DBConnection, d *schema.ResourceData) error {
+func setSchemaOwner(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(schemaOwnerAttr) {
 		return nil
 	}

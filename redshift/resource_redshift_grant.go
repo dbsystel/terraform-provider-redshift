@@ -132,7 +132,7 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objects := d.Get(grantObjectsAttr).(*schema.Set).List()
 
-	privileges := []string{}
+	var privileges []string
 	for _, p := range d.Get(grantPrivilegesAttr).(*schema.Set).List() {
 		privileges = append(privileges, p.(string))
 	}
@@ -151,7 +151,7 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 	}
 
 	if !validatePrivileges(privileges, objectType) {
-		return fmt.Errorf("Invalid privileges list %v for object of type %s", privileges, objectType)
+		return fmt.Errorf(`invalid privileges list %+v for object of type %q`, privileges, objectType)
 	}
 
 	databaseName := getDatabaseName(db, d)
@@ -218,7 +218,7 @@ func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) err
 	case "language":
 		return readLanguageGrants(db, d)
 	default:
-		return fmt.Errorf("Unsupported %s %s", grantObjectTypeAttr, objectType)
+		return fmt.Errorf("unsupported %s: %q", grantObjectTypeAttr, objectType)
 	}
 }
 
@@ -276,7 +276,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 		return err
 	}
 
-	privileges := []string{}
+	var privileges []string
 	appendIfTrue(databaseCreate, "create", &privileges)
 	appendIfTrue(databaseTemp, "temporary", &privileges)
 	appendIfTrue(databaseUsage, "usage", &privileges)
@@ -338,7 +338,7 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
 		return err
 	}
 
-	privileges := []string{}
+	var privileges []string
 	appendIfTrue(schemaCreate, "create", &privileges)
 	appendIfTrue(schemaUsage, "usage", &privileges)
 
@@ -758,7 +758,7 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 
 func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 	var query, toWhomIndicator, entityName string
-	privileges := []string{}
+	var privileges []string
 	for _, p := range d.Get(grantPrivilegesAttr).(*schema.Set).List() {
 		privileges = append(privileges, p.(string))
 	}
@@ -860,7 +860,7 @@ func isGrantToPublic(d *schema.ResourceData) bool {
 }
 
 func generateGrantID(d *schema.ResourceData) string {
-	parts := []string{}
+	var parts []string
 
 	if _, isGroup := d.GetOk(grantGroupAttr); isGroup {
 		name := d.Get(grantGroupAttr).(string)

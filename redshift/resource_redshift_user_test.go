@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"os"
@@ -416,7 +417,7 @@ func checkUserExists(client *Client, user string) (bool, error) {
 	var _rez int
 	err = db.QueryRow("SELECT 1 FROM pg_user_info WHERE usename=$1", user).Scan(&_rez)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about user: %s", err)

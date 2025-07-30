@@ -283,12 +283,12 @@ func dataSourceRedshiftSchemaRead(db *DBConnection, d *schema.ResourceData) erro
 	d.SetId(schemaId)
 	d.Set(schemaOwnerAttr, schemaOwner)
 
-	switch {
-	case schemaType == "local":
+	switch schemaType {
+	case "local":
 		return resourceRedshiftSchemaReadLocal(db, d)
-	case schemaType == "external":
+	case "external":
 		return resourceRedshiftSchemaReadExternal(db, d)
 	default:
-		return fmt.Errorf(`Unsupported schema type "%s". Supported types are "local" and "external".`, schemaType)
+		return fmt.Errorf(`unsupported schema type %q: supported types are "local" and "external"`, schemaType)
 	}
 }

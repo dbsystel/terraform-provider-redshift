@@ -11,6 +11,6 @@ func forceNewIfListSizeChanged(key string) schema.CustomizeDiffFunc {
 	return customdiff.ForceNewIfChange(key, listSizeChanged)
 }
 
-func listSizeChanged(ctx context.Context, old, new, meta interface{}) bool {
+func listSizeChanged(_ context.Context, old, new, _ interface{}) bool {
 	return len(old.([]interface{})) != len(new.([]interface{}))
 }

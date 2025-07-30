@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -285,7 +286,7 @@ func checkDefACLExists(client *Client, schemaID, ownerID int, objectType, groupN
 	).Scan(&_rez)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about default ACL: %s", err)

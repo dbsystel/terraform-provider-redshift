@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -103,7 +104,7 @@ func resourceRedshiftDatashareExists(db *DBConnection, d *schema.ResourceData) (
 	err := db.QueryRow(query, d.Id()).Scan(&name)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -145,8 +146,8 @@ func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) e
 		}
 	}
 
-	for _, schema := range d.Get(dataShareSchemasAttr).(*schema.Set).List() {
-		err = addSchemaToDatashare(tx, shareName, schema.(string))
+	for _, dataShareSchema := range d.Get(dataShareSchemasAttr).(*schema.Set).List() {
+		err = addSchemaToDatashare(tx, shareName, dataShareSchema.(string))
 		if err != nil {
 			return err
 		}
@@ -178,7 +179,8 @@ func resourceRedshiftDatashareAddSchema(tx *sql.Tx, shareName string, schemaName
 	_, err := tx.Exec(query)
 	if err != nil {
 		// if the schema is already in the datashare we get a "duplicate schema" error code. This is fine.
-		if pqErr, ok := err.(*pq.Error); ok {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) {
 			if string(pqErr.Code) == pqErrorCodeDuplicateSchema {
 				log.Printf("[WARN] Schema %s already exists in datashare %s\n", schemaName, shareName)
 			} else {
@@ -241,14 +243,13 @@ func resourceRedshiftDatashareRemoveSchema(tx *sql.Tx, shareName string, schemaN
 	_, err := tx.Exec(query)
 	if err != nil {
 		// if the schema is not already in the datashare we get a "datashare does not contain schema" error code. This is fine.
-		if pqErr, ok := err.(*pq.Error); ok {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) {
 			if string(pqErr.Code) == pqErrorCodeInvalidSchemaName {
 				log.Printf("[WARN] Schema %s does not exist in datashare %s\n", schemaName, shareName)
 			} else {
 				return err
 			}
-		} else {
-			return err
 		}
 	}
 	return nil
@@ -370,7 +371,7 @@ func setDatashareOwner(tx *sql.Tx, d *schema.ResourceData) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(shareName), newValue)
 	log.Printf("[DEBUG] %s\n", query)
 	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("Error updating datashare OWNER :%w", err)
+		return fmt.Errorf("error updating datashare OWNER: %w", err)
 	}
 	return nil
 }
@@ -385,7 +386,7 @@ func setDatasharePubliclyAccessble(tx *sql.Tx, d *schema.ResourceData) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s SET PUBLICACCESSIBLE %t", pq.QuoteIdentifier(shareName), newValue)
 	log.Printf("[DEBUG] %s\n", query)
 	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("Error updating datashare PUBLICACCESSBILE :%w", err)
+		return fmt.Errorf("error updating datashare PUBLICACCESSBILE: %w", err)
 	}
 	return nil
 }
@@ -430,7 +431,7 @@ func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) e
 	var shareName string
 	query := "SELECT share_name FROM svv_datashares WHERE share_type='OUTBOUND' AND share_id=$1"
 	if err := tx.QueryRow(query, d.Id()).Scan(&shareName); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			log.Printf("[WARN] data share with id %s does not exist.\n", d.Id())
 			return nil
 		}

@@ -153,7 +153,7 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
-	config := Config{
+	cfg := Config{
 		Host:     d.Get("host").(string),
 		Port:     d.Get("port").(int),
 		Username: username,
@@ -164,7 +164,7 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 	}
 
 	log.Println("[DEBUG] creating database client")
-	client := config.NewClient(d.Get("database").(string))
+	client := cfg.NewClient(d.Get("database").(string))
 	log.Println("[DEBUG] created database client")
 	return client, nil
 }
@@ -172,7 +172,7 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 func resolveCredentials(d *schema.ResourceData) (string, string, error) {
 	username, ok := d.GetOk("username")
 	if (!ok) || username == nil {
-		return "", "", fmt.Errorf("Username is required")
+		return "", "", fmt.Errorf("username is required")
 	}
 	if _, useTemporaryCredentials := d.GetOk("temporary_credentials"); useTemporaryCredentials {
 		log.Println("[DEBUG] using temporary credentials authentication")

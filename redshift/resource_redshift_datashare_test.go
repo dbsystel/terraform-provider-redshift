@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -134,7 +135,7 @@ func checkDatashareExists(client *Client, shareName string) (bool, error) {
 	err = db.QueryRow("SELECT 1 from svv_datashares WHERE share_type = 'OUTBOUND' AND share_name = $1", strings.ToLower(shareName)).Scan(&_rez)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about datashare: %w", err)

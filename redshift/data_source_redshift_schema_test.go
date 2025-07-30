@@ -82,7 +82,7 @@ data "redshift_schema" "spectrum" {
 					resource.TestCheckResourceAttr("data.redshift_schema.spectrum", fmt.Sprintf("%s.0.data_catalog_source.#", schemaExternalSchemaAttr), "1"),
 					resource.TestCheckResourceAttr("data.redshift_schema.spectrum", fmt.Sprintf("%s.0.data_catalog_source.0.iam_role_arns.#", schemaExternalSchemaAttr), fmt.Sprintf("%d", len(iamRoleArns))),
 					resource.ComposeTestCheckFunc(func() []resource.TestCheckFunc {
-						results := []resource.TestCheckFunc{}
+						var results []resource.TestCheckFunc
 						for i, arn := range iamRoleArns {
 							results = append(results, resource.TestCheckResourceAttr("data.redshift_schema.spectrum", fmt.Sprintf("%s.0.data_catalog_source.0.iam_role_arns.%d", schemaExternalSchemaAttr, i), arn))
 						}
@@ -149,7 +149,7 @@ data "redshift_schema" "hive" {
 					resource.TestCheckResourceAttr("data.redshift_schema.hive", fmt.Sprintf("%s.0.hive_metastore_source.0.port", schemaExternalSchemaAttr), dbPort),
 					resource.TestCheckResourceAttr("data.redshift_schema.hive", fmt.Sprintf("%s.0.hive_metastore_source.0.iam_role_arns.#", schemaExternalSchemaAttr), fmt.Sprintf("%d", len(iamRoleArns))),
 					resource.ComposeTestCheckFunc(func() []resource.TestCheckFunc {
-						results := []resource.TestCheckFunc{}
+						var results []resource.TestCheckFunc
 						for i, arn := range iamRoleArns {
 							results = append(results, resource.TestCheckResourceAttr("data.redshift_schema.hive", fmt.Sprintf("%s.0.hive_metastore_source.0.iam_role_arns.%d", schemaExternalSchemaAttr, i), arn))
 						}
@@ -227,7 +227,7 @@ data "redshift_schema" "postgres" {
 					resource.TestCheckResourceAttr("data.redshift_schema.postgres", fmt.Sprintf("%s.0.rds_postgres_source.0.secret_arn", schemaExternalSchemaAttr), dbSecretArn),
 					resource.TestCheckResourceAttr("data.redshift_schema.postgres", fmt.Sprintf("%s.0.rds_postgres_source.0.iam_role_arns.#", schemaExternalSchemaAttr), fmt.Sprintf("%d", len(iamRoleArns))),
 					resource.ComposeTestCheckFunc(func() []resource.TestCheckFunc {
-						results := []resource.TestCheckFunc{}
+						var results []resource.TestCheckFunc
 						for i, arn := range iamRoleArns {
 							results = append(results, resource.TestCheckResourceAttr("data.redshift_schema.postgres", fmt.Sprintf("%s.0.rds_postgres_source.0.iam_role_arns.%d", schemaExternalSchemaAttr, i), arn))
 						}
@@ -298,7 +298,7 @@ data "redshift_schema" "mysql" {
 					resource.TestCheckResourceAttr("data.redshift_schema.mysql", fmt.Sprintf("%s.0.rds_mysql_source.0.secret_arn", schemaExternalSchemaAttr), dbSecretArn),
 					resource.TestCheckResourceAttr("data.redshift_schema.mysql", fmt.Sprintf("%s.0.rds_mysql_source.0.iam_role_arns.#", schemaExternalSchemaAttr), fmt.Sprintf("%d", len(iamRoleArns))),
 					resource.ComposeTestCheckFunc(func() []resource.TestCheckFunc {
-						results := []resource.TestCheckFunc{}
+						var results []resource.TestCheckFunc
 						for i, arn := range iamRoleArns {
 							results = append(results, resource.TestCheckResourceAttr("data.redshift_schema.mysql", fmt.Sprintf("%s.0.rds_mysql_source.0.iam_role_arns.%d", schemaExternalSchemaAttr, i), arn))
 						}

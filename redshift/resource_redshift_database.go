@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -109,7 +110,7 @@ func resourceRedshiftDatabaseExists(db *DBConnection, d *schema.ResourceData) (b
 	err := db.QueryRow(query, d.Id()).Scan(&name)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -303,13 +304,13 @@ func setDatabaseName(tx *sql.Tx, d *schema.ResourceData) error {
 	newValue := newRaw.(string)
 
 	if newValue == "" {
-		return fmt.Errorf("Error setting database name to an empty string")
+		return fmt.Errorf("error setting database name to an empty string")
 	}
 
 	query := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
 	log.Printf("[DEBUG] renaming database %s to %s: %s\n", oldValue, newValue, query)
 	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("Error updating database NAME: %w", err)
+		return fmt.Errorf("error updating database NAME: %w", err)
 	}
 
 	return nil

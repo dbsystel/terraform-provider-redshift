@@ -2,7 +2,6 @@ package redshift
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -50,18 +49,18 @@ func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
 
 	sdkClient, err := stsClient(t)
 	if err != nil {
-		t.Skip(fmt.Sprintf("Unable to load STS client due to: %s", err))
+		t.Skipf("Unable to load STS client due to: %s", err)
 	}
 
 	response, err := sdkClient.GetCallerIdentity(context.TODO(), nil)
 	if err != nil {
-		t.Skip(fmt.Sprintf("Unable to get current STS identity due to: %s", err))
+		t.Skipf("Unable to get current STS identity due to: %s", err)
 	}
 	if response == nil {
 		t.Skip("Unable to get current STS identity. Empty response.")
 	}
 
-	config := map[string]interface{}{
+	cfg := map[string]interface{}{
 		"temporary_credentials": []interface{}{
 			map[string]interface{}{
 				"cluster_identifier": clusterIdentifier,
@@ -69,13 +68,13 @@ func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
 		},
 	}
 	if arn, ok := os.LookupEnv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN"); ok {
-		config["temporary_credentials"].([]interface{})[0].(map[string]interface{})["assume_role"] = []interface{}{
+		cfg["temporary_credentials"].([]interface{})[0].(map[string]interface{})["assume_role"] = []interface{}{
 			map[string]interface{}{
 				"arn": arn,
 			},
 		}
 	}
-	diagnostics := provider.Configure(context.Background(), terraform.NewResourceConfigRaw(config))
+	diagnostics := provider.Configure(context.Background(), terraform.NewResourceConfigRaw(cfg))
 	if diagnostics != nil {
 		if diagnostics.HasError() {
 			t.Fatalf("Failed to configure temporary credentials provider: %v", diagnostics)
@@ -83,12 +82,12 @@ func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
 	}
 }
 
-func stsClient(t *testing.T) (*sts.Client, error) {
-	config, err := config.LoadDefaultConfig(context.TODO())
+func stsClient(_ *testing.T) (*sts.Client, error) {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		return nil, err
 	}
-	return sts.NewFromConfig(config), nil
+	return sts.NewFromConfig(cfg), nil
 }
 
 func TestAccRedshiftTemporaryCredentials(t *testing.T) {

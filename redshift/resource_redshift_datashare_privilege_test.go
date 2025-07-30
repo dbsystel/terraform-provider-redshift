@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -115,7 +116,7 @@ func checkDatasharePrivilegeAccountExists(client *Client, shareName string, acco
 	err = db.QueryRow("SELECT 1 from svv_datashare_consumers WHERE share_name = $1 AND consumer_account = $2", strings.ToLower(shareName), account).Scan(&_rez)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about datashare privileges: %w", err)
@@ -134,7 +135,7 @@ func checkDatasharePrivilegeNamespaceExists(client *Client, shareName string, na
 	err = db.QueryRow("SELECT 1 from svv_datashare_consumers WHERE share_name = $1 AND consumer_namespace = $2", strings.ToLower(shareName), namespace).Scan(&_rez)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about datashare privileges: %w", err)

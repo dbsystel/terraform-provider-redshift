@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -237,7 +238,7 @@ func checkGroupExists(client *Client, group string) (bool, error) {
 	var _rez int
 	err = db.QueryRow("SELECT 1 FROM pg_group WHERE groname=$1", strings.ToLower(group)).Scan(&_rez)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("Error reading info about group: %s", err)

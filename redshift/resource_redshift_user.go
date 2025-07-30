@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -61,13 +62,13 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 			isPasswordKnown := d.NewValueKnown(userPasswordAttr)
 			password, hasPassword := d.GetOk(userPasswordAttr)
 			if isSuperuser && isPasswordKnown && (!hasPassword || password.(string) == "") {
-				return fmt.Errorf("Users that are superusers must define a password.")
+				return fmt.Errorf("users that are superusers must define a password")
 			}
 
 			isSyslogAccessKnown := d.NewValueKnown(userSyslogAccessAttr)
 			syslogAccess, hasSyslogAccess := d.GetOk(userSyslogAccessAttr)
 			if isSuperuser && isSyslogAccessKnown && hasSyslogAccess && syslogAccess != defaultUserSuperuserSyslogAccess {
-				return fmt.Errorf("Superusers must have syslog access set to %s.", defaultUserSuperuserSyslogAccess)
+				return fmt.Errorf("superusers must have syslog access set to %q", defaultUserSuperuserSyslogAccess)
 			}
 
 			return nil
@@ -144,7 +145,7 @@ func resourceRedshiftUserExists(db *DBConnection, d *schema.ResourceData) (bool,
 	err := db.QueryRow("SELECT usename FROM pg_user_info WHERE usesysid = $1", d.Id()).Scan(&name)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -207,17 +208,17 @@ func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error 
 
 		val := v.(string)
 		if val != "" {
-			switch {
-			case opt.hclKey == userPasswordAttr:
+			switch opt.hclKey {
+			case userPasswordAttr:
 				createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, pqQuoteLiteral(val)))
-			case opt.hclKey == userValidUntilAttr:
+			case userValidUntilAttr:
 				switch {
 				case v.(string) == "", strings.ToLower(v.(string)) == "infinity":
 					createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, "infinity"))
 				default:
 					createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, pqQuoteLiteral(val)))
 				}
-			case opt.hclKey == userSyslogAccessAttr:
+			case userSyslogAccessAttr:
 				createOpts = append(createOpts, fmt.Sprintf("%s %s", opt.sqlKey, val))
 			default:
 				createOpts = append(createOpts, fmt.Sprintf("%s %s", opt.sqlKey, pq.QuoteIdentifier(val)))
@@ -245,9 +246,9 @@ func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error 
 
 	userName := d.Get(userNameAttr).(string)
 	createStr := strings.Join(createOpts, " ")
-	sql := fmt.Sprintf("CREATE USER %s WITH %s", pq.QuoteIdentifier(userName), createStr)
+	query := fmt.Sprintf("CREATE USER %s WITH %s", pq.QuoteIdentifier(userName), createStr)
 
-	if _, err := tx.Exec(sql); err != nil {
+	if _, err := tx.Exec(query); err != nil {
 		return fmt.Errorf("error creating user %s: %w", userName, err)
 	}
 
@@ -296,22 +297,22 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	userSQL := fmt.Sprintf("SELECT %s FROM svv_user_info WHERE user_id = $1", strings.Join(columns, ","))
 	err := db.QueryRow(userSQL, useSysID).Scan(values...)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
 		d.SetId("")
 		return nil
 	case err != nil:
-		return fmt.Errorf("Error reading User: %w", err)
+		return fmt.Errorf("error reading User: %w", err)
 	}
 
 	err = db.QueryRow("SELECT COALESCE(valuntil, 'infinity') FROM pg_user_info WHERE usesysid = $1", useSysID).Scan(&userValidUntil)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
 		d.SetId("")
 		return nil
 	case err != nil:
-		return fmt.Errorf("Error reading User: %w", err)
+		return fmt.Errorf("error reading User: %w", err)
 	}
 	userConnLimitNumber := -1
 	if userConnLimit != "UNLIMITED" {
@@ -497,12 +498,12 @@ func setUserName(tx *sql.Tx, d *schema.ResourceData) error {
 	newValue := newRaw.(string)
 
 	if newValue == "" {
-		return fmt.Errorf("Error setting user name to an empty string")
+		return fmt.Errorf("error setting user name to an empty string")
 	}
 
-	sql := fmt.Sprintf("ALTER USER %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating User NAME: %w", err)
+	query := fmt.Sprintf("ALTER USER %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating User NAME: %w", err)
 	}
 
 	return nil
@@ -521,9 +522,9 @@ func setUserPassword(tx *sql.Tx, d *schema.ResourceData) error {
 		passwdTok = fmt.Sprintf("PASSWORD '%s'", pqQuoteLiteral(password))
 	}
 
-	sql := fmt.Sprintf("ALTER USER %s %s", pq.QuoteIdentifier(userName), passwdTok)
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user password: %w", err)
+	query := fmt.Sprintf("ALTER USER %s %s", pq.QuoteIdentifier(userName), passwdTok)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user password: %w", err)
 	}
 	return nil
 }
@@ -535,9 +536,9 @@ func setUserConnLimit(tx *sql.Tx, d *schema.ResourceData) error {
 
 	connLimit := d.Get(userConnLimitAttr).(int)
 	userName := d.Get(userNameAttr).(string)
-	sql := fmt.Sprintf("ALTER USER %s CONNECTION LIMIT %d", pq.QuoteIdentifier(userName), connLimit)
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user CONNECTION LIMIT: %w", err)
+	query := fmt.Sprintf("ALTER USER %s CONNECTION LIMIT %d", pq.QuoteIdentifier(userName), connLimit)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user CONNECTION LIMIT: %w", err)
 	}
 
 	return nil
@@ -550,14 +551,14 @@ func setUserSessionTimeout(tx *sql.Tx, d *schema.ResourceData) error {
 
 	sessionTimeout := d.Get(userSessionTimeoutAttr).(int)
 	userName := d.Get(userNameAttr).(string)
-	sql := ""
+	var query string
 	if sessionTimeout == 0 {
-		sql = fmt.Sprintf("ALTER USER %s RESET SESSION TIMEOUT", pq.QuoteIdentifier(userName))
+		query = fmt.Sprintf("ALTER USER %s RESET SESSION TIMEOUT", pq.QuoteIdentifier(userName))
 	} else {
-		sql = fmt.Sprintf("ALTER USER %s SESSION TIMEOUT %d", pq.QuoteIdentifier(userName), sessionTimeout)
+		query = fmt.Sprintf("ALTER USER %s SESSION TIMEOUT %d", pq.QuoteIdentifier(userName), sessionTimeout)
 	}
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user SESSION TIMEOUT: %w", err)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user SESSION TIMEOUT: %w", err)
 	}
 
 	return nil
@@ -574,9 +575,9 @@ func setUserCreateDB(tx *sql.Tx, d *schema.ResourceData) error {
 		tok = "CREATEDB"
 	}
 	userName := d.Get(userNameAttr).(string)
-	sql := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user CREATEDB: %w", err)
+	query := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user CREATEDB: %w", err)
 	}
 
 	return nil
@@ -593,9 +594,9 @@ func setUserSuperuser(tx *sql.Tx, d *schema.ResourceData) error {
 		tok = "CREATEUSER"
 	}
 	userName := d.Get(userNameAttr).(string)
-	sql := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user SUPERUSER: %w", err)
+	query := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user SUPERUSER: %w", err)
 	}
 
 	return nil
@@ -614,9 +615,9 @@ func setUserValidUntil(tx *sql.Tx, d *schema.ResourceData) error {
 	}
 
 	userName := d.Get(userNameAttr).(string)
-	sql := fmt.Sprintf("ALTER USER %s VALID UNTIL '%s'", pq.QuoteIdentifier(userName), pqQuoteLiteral(validUntil))
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user VALID UNTIL: %w", err)
+	query := fmt.Sprintf("ALTER USER %s VALID UNTIL '%s'", pq.QuoteIdentifier(userName), pqQuoteLiteral(validUntil))
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user VALID UNTIL: %w", err)
 	}
 
 	return nil
@@ -638,9 +639,9 @@ func setUserSyslogAccess(tx *sql.Tx, d *schema.ResourceData) error {
 	}
 
 	userName := d.Get(userNameAttr).(string)
-	sql := fmt.Sprintf("ALTER USER %s WITH SYSLOG ACCESS %s", pq.QuoteIdentifier(userName), syslogAccessComputed)
-	if _, err := tx.Exec(sql); err != nil {
-		return fmt.Errorf("Error updating user SYSLOG ACCESS: %w", err)
+	query := fmt.Sprintf("ALTER USER %s WITH SYSLOG ACCESS %s", pq.QuoteIdentifier(userName), syslogAccessComputed)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating user SYSLOG ACCESS: %w", err)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -115,13 +116,13 @@ func resourceRedshiftDefaultPrivilegesCreate(db *DBConnection, d *schema.Resourc
 	privilegesSet := d.Get(defaultPrivilegesPrivilegesAttr).(*schema.Set)
 	objectType := d.Get(defaultPrivilegesObjectTypeAttr).(string)
 
-	privileges := []string{}
+	var privileges []string
 	for _, p := range privilegesSet.List() {
 		privileges = append(privileges, strings.ToUpper(p.(string)))
 	}
 
 	if !validatePrivileges(privileges, objectType) {
-		return fmt.Errorf("Invalid privileges list '%v' for object type '%s'", privileges, objectType)
+		return fmt.Errorf(`invalid privileges list %+v for object type %q`, privileges, objectType)
 	}
 
 	tx, err := startTransaction(db.client, "")
@@ -265,11 +266,11 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, entityI
 		&tableDrop,
 		&tableReferences,
 		&tableRule,
-		&tableTrigger); err != nil && err != sql.ErrNoRows {
+		&tableTrigger); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed to collect privileges: %w", err)
 	}
 
-	privileges := []string{}
+	var privileges []string
 	appendIfTrue(tableSelect, "select", &privileges)
 	appendIfTrue(tableUpdate, "update", &privileges)
 	appendIfTrue(tableInsert, "insert", &privileges)

@@ -657,7 +657,7 @@ func testAccRedshiftGrant_Regression_Issue_43_compare_ids(addr1 string, addr2 st
 	}
 }
 
-func testAccRedshiftGrant_basicCallables_configUserGroup(username, group, schema string) string {
+func testAccRedshiftGrant_basicCallables_configUserGroup(username, group, _ string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "user" {
   name = %[1]q
@@ -717,7 +717,7 @@ resource "redshift_grant" "grant_user_proc" {
 `, username, group, schema)
 }
 
-func testAccRedshiftGrant_basicCallables_createSchemaAndCallables(t *testing.T, db *DBConnection, schema string) error {
+func testAccRedshiftGrant_basicCallables_createSchemaAndCallables(_ *testing.T, db *DBConnection, schema string) error {
 	_, err := db.Exec(fmt.Sprintf("CREATE SCHEMA %s", pq.QuoteIdentifier(schema)))
 	if err != nil {
 		return fmt.Errorf("couldn't create schema: %s", err)
@@ -771,7 +771,7 @@ func testAccRedshiftGrant_basicCallables_createSchemaAndCallables(t *testing.T, 
 	return nil
 }
 
-func testAccRedshiftGrant_basicCallables_dropResources(t *testing.T, db *DBConnection, schema string) error {
+func testAccRedshiftGrant_basicCallables_dropResources(_ *testing.T, db *DBConnection, schema string) error {
 	query := fmt.Sprintf("DROP SCHEMA %s CASCADE", pq.QuoteIdentifier(schema))
 	_, err := db.Exec(query)
 	if err != nil {

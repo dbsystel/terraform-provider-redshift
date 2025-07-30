@@ -92,7 +92,7 @@ func (c *Client) Connect() (*DBConnection, error) {
 	if !found {
 		db, err := sql.Open(proxyDriverName, dsn)
 		if err != nil {
-			return nil, fmt.Errorf("Error connecting to PostgreSQL server %s: %w", c.config.Host, err)
+			return nil, fmt.Errorf("error connecting to PostgreSQL server %q: %w", c.config.Host, err)
 		}
 
 		// We don't want to retain connection
@@ -131,7 +131,7 @@ func (c *Config) connParams() []string {
 	params["sslmode"] = c.SSLMode
 	params["connect_timeout"] = "180"
 
-	paramsArray := []string{}
+	var paramsArray []string
 	for key, value := range params {
 		paramsArray = append(paramsArray, fmt.Sprintf("%s=%s", key, url.QueryEscape(value)))
 	}
@@ -152,7 +152,6 @@ func (c *Config) Client() (*Client, error) {
 
 	db, err := sql.Open(proxyDriverName, conninfo)
 	if err != nil {
-		db.Close()
 		return nil, err
 	}
 
