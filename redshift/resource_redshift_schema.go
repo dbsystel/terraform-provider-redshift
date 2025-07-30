@@ -38,7 +38,6 @@ A database contains one or more named schemas. Each schema in a database contain
 		DeleteContext: RedshiftResourceFunc(
 			RedshiftResourceRetryOnPQErrors(resourceRedshiftSchemaDelete),
 		),
-		Exists: RedshiftResourceExistsFunc(resourceRedshiftSchemaExists),
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
@@ -399,20 +398,6 @@ A database contains one or more named schemas. Each schema in a database contain
 			},
 		},
 	}
-}
-
-func resourceRedshiftSchemaExists(db *DBConnection, d *schema.ResourceData) (bool, error) {
-	var name string
-	err := db.QueryRow("SELECT nspname FROM pg_namespace WHERE oid = $1", d.Id()).Scan(&name)
-
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return false, nil
-	case err != nil:
-		return false, err
-	}
-
-	return true, nil
 }
 
 func resourceRedshiftSchemaRead(db *DBConnection, d *schema.ResourceData) error {

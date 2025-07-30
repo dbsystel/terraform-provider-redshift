@@ -28,7 +28,6 @@ Groups are collections of users who are all granted whatever privileges are asso
 		DeleteContext: RedshiftResourceFunc(
 			RedshiftResourceRetryOnPQErrors(resourceRedshiftGroupDelete),
 		),
-		Exists: RedshiftResourceExistsFunc(resourceRedshiftGroupExists),
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
@@ -53,20 +52,6 @@ Groups are collections of users who are all granted whatever privileges are asso
 			},
 		},
 	}
-}
-
-func resourceRedshiftGroupExists(db *DBConnection, d *schema.ResourceData) (bool, error) {
-	var name string
-	err := db.QueryRow("SELECT groname FROM pg_group WHERE grosysid = $1", d.Id()).Scan(&name)
-
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return false, nil
-	case err != nil:
-		return false, err
-	}
-
-	return true, nil
 }
 
 func resourceRedshiftGroupRead(db *DBConnection, d *schema.ResourceData) error {
