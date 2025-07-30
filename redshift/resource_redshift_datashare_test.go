@@ -114,11 +114,11 @@ func testAccCheckRedshiftDatashareExists(shareName string) resource.TestCheckFun
 
 		exists, err := checkDatashareExists(client, shareName)
 		if err != nil {
-			return fmt.Errorf("Error checking datashare %s", err)
+			return fmt.Errorf("error checking datashare: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Datashare not found")
+			return fmt.Errorf("datashare not found")
 		}
 
 		return nil
@@ -138,7 +138,7 @@ func checkDatashareExists(client *Client, shareName string) (bool, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about datashare: %w", err)
+		return false, fmt.Errorf("error reading info about datashare: %w", err)
 	}
 
 	return true, nil
@@ -155,11 +155,11 @@ func testAccCheckRedshiftDatashareDestroy(s *terraform.State) error {
 		exists, err := checkDatashareExists(client, rs.Primary.Attributes[dataShareNameAttr])
 
 		if err != nil {
-			return fmt.Errorf("Error checking datashare %w", err)
+			return fmt.Errorf("error checking datashare %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("Datashare still exists after destroy")
+			return fmt.Errorf("datashare still exists after destroy")
 		}
 	}
 

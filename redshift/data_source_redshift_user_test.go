@@ -17,7 +17,7 @@ func TestAccDataSourceRedshiftUser_Basic(t *testing.T) {
 		CheckDestroy:      testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceRedshiftUserConfig_Basic(userName),
+				Config: testAccDataSourceRedshiftUserConfigBasic(userName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRedshiftUserExists(userName),
 					resource.TestCheckResourceAttr("data.redshift_user.simple", userNameAttr, userName),
@@ -33,7 +33,7 @@ func TestAccDataSourceRedshiftUser_Basic(t *testing.T) {
 	})
 }
 
-func testAccDataSourceRedshiftUserConfig_Basic(userName string) string {
+func testAccDataSourceRedshiftUserConfigBasic(userName string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "simple" {
   %[1]s = %[2]q

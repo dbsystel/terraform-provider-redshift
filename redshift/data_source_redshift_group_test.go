@@ -18,7 +18,7 @@ func TestAccDataSourceRedshiftGroup_basic(t *testing.T) {
 		CheckDestroy:      testAccCheckRedshiftGroupDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceRedshiftGroupConfig_basic(groupName, userName),
+				Config: testAccDataSourceRedshiftGroupConfigBasic(groupName, userName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.redshift_group.group", groupNameAttr, groupName),
 					resource.TestCheckResourceAttr("data.redshift_group.group", fmt.Sprintf("%s.#", groupUsersAttr), "1"),
@@ -29,7 +29,7 @@ func TestAccDataSourceRedshiftGroup_basic(t *testing.T) {
 	})
 }
 
-func testAccDataSourceRedshiftGroupConfig_basic(groupName string, userName string) string {
+func testAccDataSourceRedshiftGroupConfigBasic(groupName string, userName string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "user" {
 	%[1]s = %[2]q

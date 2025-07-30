@@ -92,8 +92,8 @@ func stsClient(_ *testing.T) (*sts.Client, error) {
 
 func TestAccRedshiftTemporaryCredentials(t *testing.T) {
 	provider := Provider()
-	assume_role_arn := os.Getenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN")
-	defer os.Setenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN", assume_role_arn)
+	assumeRoleArn := os.Getenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN")
+	defer os.Setenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN", assumeRoleArn)
 	os.Unsetenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN")
 	prepareRedshiftTemporaryCredentialsTestCases(t, provider)
 	client, ok := provider.Meta().(*Client)
@@ -123,8 +123,8 @@ func TestAccRedshiftTemporaryCredentialsAssumeRole(t *testing.T) {
 }
 
 func prepareRedshiftTemporaryCredentialsTestCases(t *testing.T, provider *schema.Provider) {
-	redshift_password := os.Getenv("REDSHIFT_PASSWORD")
-	defer os.Setenv("REDSHIFT_PASSWORD", redshift_password)
+	redshiftPassword := os.Getenv("REDSHIFT_PASSWORD")
+	defer os.Setenv("REDSHIFT_PASSWORD", redshiftPassword)
 	os.Unsetenv("REDSHIFT_PASSWORD")
 	rawUsername := os.Getenv("REDSHIFT_USER")
 	defer os.Setenv("REDSHIFT_USER", rawUsername)

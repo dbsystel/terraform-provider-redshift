@@ -92,15 +92,15 @@ func testAccCheckRedshiftDatasharePrivilegeDestroy(s *terraform.State) error {
 		} else if namespace, ok := rs.Primary.Attributes[datasharePrivilegeNamespaceAttr]; ok {
 			exists, err = checkDatasharePrivilegeNamespaceExists(client, shareName, namespace)
 		} else {
-			err = fmt.Errorf("Neither %s nor %s was set", datasharePrivilegeAccountAttr, datasharePrivilegeNamespaceAttr)
+			err = fmt.Errorf("neither %s nor %s was set", datasharePrivilegeAccountAttr, datasharePrivilegeNamespaceAttr)
 		}
 
 		if err != nil {
-			return fmt.Errorf("Error checking datashare privilege: %w", err)
+			return fmt.Errorf("error checking datashare privilege: %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("Datashare privilege still exists after destroy")
+			return fmt.Errorf("datashare privilege still exists after destroy")
 		}
 	}
 	return nil
@@ -119,7 +119,7 @@ func checkDatasharePrivilegeAccountExists(client *Client, shareName string, acco
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about datashare privileges: %w", err)
+		return false, fmt.Errorf("error reading info about datashare privileges: %w", err)
 	}
 
 	return true, nil
@@ -138,7 +138,7 @@ func checkDatasharePrivilegeNamespaceExists(client *Client, shareName string, na
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about datashare privileges: %w", err)
+		return false, fmt.Errorf("error reading info about datashare privileges: %w", err)
 	}
 
 	return true, nil
@@ -150,11 +150,11 @@ func testAccCheckRedshiftDatashareAccountPrivilegeExists(shareName string, accou
 
 		exists, err := checkDatasharePrivilegeAccountExists(client, shareName, account)
 		if err != nil {
-			return fmt.Errorf("Error checking datashare privilege %s", err)
+			return fmt.Errorf("error checking datashare privilege: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Datashare privilege not found")
+			return fmt.Errorf("datashare privilege not found")
 		}
 
 		return nil
@@ -167,11 +167,11 @@ func testAccCheckRedshiftDatashareNamespacePrivilegeExists(shareName string, nam
 
 		exists, err := checkDatasharePrivilegeNamespaceExists(client, shareName, namespace)
 		if err != nil {
-			return fmt.Errorf("Error checking datashare privilege %s", err)
+			return fmt.Errorf("error checking datashare privilege: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Datashare privilege not found")
+			return fmt.Errorf("datashare privilege not found")
 		}
 
 		return nil

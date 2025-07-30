@@ -381,11 +381,11 @@ func testAccCheckRedshiftUserDestroy(s *terraform.State) error {
 		exists, err := checkUserExists(client, rs.Primary.ID)
 
 		if err != nil {
-			return fmt.Errorf("Error checking role %s", err)
+			return fmt.Errorf("error checking role: %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("User still exists after destroy")
+			return fmt.Errorf("user still exists after destroy")
 		}
 	}
 
@@ -398,11 +398,11 @@ func testAccCheckRedshiftUserExists(user string) resource.TestCheckFunc {
 
 		exists, err := checkUserExists(client, user)
 		if err != nil {
-			return fmt.Errorf("Error checking user %s", err)
+			return fmt.Errorf("error checking user: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("User not found")
+			return fmt.Errorf("user not found")
 		}
 
 		return nil
@@ -420,7 +420,7 @@ func checkUserExists(client *Client, user string) (bool, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about user: %s", err)
+		return false, fmt.Errorf("error reading info about user: %w", err)
 	}
 
 	return true, nil
@@ -497,7 +497,7 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 		}
 		portNum, err := strconv.Atoi(port)
 		if err != nil {
-			return fmt.Errorf("Unable to check if user can login due to bad REDSHIFT_PORT: %s", err)
+			return fmt.Errorf("unable to check if user can login due to bad REDSHIFT_PORT: %w", err)
 		}
 		database, ok := os.LookupEnv("REDSHIFT_DATABASE")
 		if !ok {
@@ -519,7 +519,7 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 
 		client, err := config.Client()
 		if err != nil {
-			return fmt.Errorf("User is unable to login %s", err)
+			return fmt.Errorf("user is unable to login: %w", err)
 		}
 		defer client.Close()
 		return nil

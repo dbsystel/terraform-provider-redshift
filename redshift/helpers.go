@@ -84,7 +84,7 @@ func getSchemaIDFromName(tx *sql.Tx, schema string) (schemaID int, err error) {
 	return
 }
 
-func RedshiftResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(context.Context, *schema.ResourceData, interface{}) diag.Diagnostics {
+func ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(context.Context, *schema.ResourceData, interface{}) diag.Diagnostics {
 	return func(_ context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 		client := meta.(*Client)
 
@@ -97,7 +97,7 @@ func RedshiftResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) fu
 	}
 }
 
-func RedshiftResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
+func ResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
 	return func(db *DBConnection, d *schema.ResourceData) error {
 		for i := 0; i < 10; i++ {
 			err := fn(db, d)

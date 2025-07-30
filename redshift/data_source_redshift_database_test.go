@@ -16,7 +16,7 @@ func TestAccDataSourceRedshiftDatabase_basic(t *testing.T) {
 		ProviderFactories: testAccProviders,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceRedshiftDatabaseConfig_basic(dbName),
+				Config: testAccDataSourceRedshiftDatabaseConfigBasic(dbName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckDatabaseExists(dbName),
 					resource.TestCheckResourceAttr("data.redshift_database.db", databaseNameAttr, dbName),
@@ -29,7 +29,7 @@ func TestAccDataSourceRedshiftDatabase_basic(t *testing.T) {
 	})
 }
 
-func testAccDataSourceRedshiftDatabaseConfig_basic(dbName string) string {
+func testAccDataSourceRedshiftDatabaseConfigBasic(dbName string) string {
 	return fmt.Sprintf(`
 resource "redshift_database" "db" {
 	%[1]s = %[2]q

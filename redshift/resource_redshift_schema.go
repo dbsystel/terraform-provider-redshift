@@ -32,11 +32,11 @@ func redshiftSchema() *schema.Resource {
 		Description: `
 A database contains one or more named schemas. Each schema in a database contains tables and other kinds of named objects. By default, a database has a single schema, which is named PUBLIC. You can use schemas to group database objects under a common name. Schemas are similar to file system directories, except that schemas cannot be nested.
 `,
-		CreateContext: RedshiftResourceFunc(resourceRedshiftSchemaCreate),
-		ReadContext:   RedshiftResourceFunc(resourceRedshiftSchemaRead),
-		UpdateContext: RedshiftResourceFunc(resourceRedshiftSchemaUpdate),
-		DeleteContext: RedshiftResourceFunc(
-			RedshiftResourceRetryOnPQErrors(resourceRedshiftSchemaDelete),
+		CreateContext: ResourceFunc(resourceRedshiftSchemaCreate),
+		ReadContext:   ResourceFunc(resourceRedshiftSchemaRead),
+		UpdateContext: ResourceFunc(resourceRedshiftSchemaUpdate),
+		DeleteContext: ResourceFunc(
+			ResourceRetryOnPQErrors(resourceRedshiftSchemaDelete),
 		),
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
@@ -574,12 +574,12 @@ func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) erro
 	defer deferredRollback(tx)
 	schemaName := d.Get(schemaNameAttr).(string)
 
-	cascade_or_restrict := "RESTRICT"
+	cascadeOrRestrict := "RESTRICT"
 	if cascade, ok := d.GetOk(schemaCascadeOnDeleteAttr); ok && cascade.(bool) {
-		cascade_or_restrict = "CASCADE"
+		cascadeOrRestrict = "CASCADE"
 	}
 
-	query := fmt.Sprintf("DROP SCHEMA %s %s", pq.QuoteIdentifier(schemaName), cascade_or_restrict)
+	query := fmt.Sprintf("DROP SCHEMA %s %s", pq.QuoteIdentifier(schemaName), cascadeOrRestrict)
 	if _, err := tx.Exec(query); err != nil {
 		return err
 	}

@@ -393,7 +393,7 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 			CheckDestroy:      func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
-					Config: testAccRedshiftGrant_basicCallables_configUserGroup(userName, groupName, schema),
+					Config: testAccRedshiftGrantBasicCallablesConfigUserGroup(userName, groupName, schema),
 				},
 				{
 					PreConfig: func() {
@@ -403,12 +403,12 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 						if err != nil {
 							t.Fatalf("couldn't start redshift connection: %s", err)
 						}
-						err = testAccRedshiftGrant_basicCallables_createSchemaAndCallables(t, conn, schema)
+						err = testAccRedshiftGrantBasicCallablesCreateSchemaAndCallables(t, conn, schema)
 						if err != nil {
 							t.Fatalf("couldn't setup database: %s", err)
 						}
 					},
-					Config: testAccRedshiftGrant_basicCallables_configUserGroupWithGrants(userName, groupName, schema),
+					Config: testAccRedshiftGrantBasicCallablesConfigUserGroupWithGrants(userName, groupName, schema),
 					Check: resource.ComposeTestCheckFunc(
 						resource.TestCheckResourceAttr("redshift_grant.grant_fun", "id", fmt.Sprintf("gn:%s_ot:function_%s_test_call(float,float)", groupName, schema)),
 						resource.TestCheckResourceAttr("redshift_grant.grant_fun", "group", groupName),
@@ -434,7 +434,7 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 					),
 				},
 				{
-					Config:  testAccRedshiftGrant_basicCallables_configUserGroupWithGrants(userName, groupName, schema),
+					Config:  testAccRedshiftGrantBasicCallablesConfigUserGroupWithGrants(userName, groupName, schema),
 					Destroy: true,
 				},
 				// Creating additional dummy step as TestStep does not have PostConfig
@@ -447,12 +447,12 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 						if err != nil {
 							t.Errorf("couldn't cleanup resources: %s", err)
 						}
-						err = testAccRedshiftGrant_basicCallables_dropResources(t, conn, schema)
+						err = testAccRedshiftGrantBasicCallablesDropResources(t, conn, schema)
 						if err != nil {
 							t.Errorf("couldn't cleanup resources: %s", err)
 						}
 					},
-					Config:   testAccRedshiftGrant_basicCallables_configUserGroupWithGrants(userName, groupName, schema),
+					Config:   testAccRedshiftGrantBasicCallablesConfigUserGroupWithGrants(userName, groupName, schema),
 					PlanOnly: true,
 					Destroy:  true,
 				},
@@ -632,32 +632,32 @@ resource "redshift_grant" "grants2" {
 		Steps: []resource.TestStep{
 			{
 				Config: config,
-				Check:  testAccRedshiftGrant_Regression_Issue_43_compare_ids("redshift_grant.grants1", "redshift_grant.grants2"),
+				Check:  testAccRedshiftGrantRegressionIssue43CompareIds("redshift_grant.grants1", "redshift_grant.grants2"),
 			},
 		},
 	})
 }
 
-func testAccRedshiftGrant_Regression_Issue_43_compare_ids(addr1 string, addr2 string) resource.TestCheckFunc {
+func testAccRedshiftGrantRegressionIssue43CompareIds(addr1 string, addr2 string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs1, ok := s.RootModule().Resources[addr1]
 		if !ok {
-			return fmt.Errorf("Not found: %s", addr1)
+			return fmt.Errorf("not found: %q", addr1)
 		}
 		rs2, ok := s.RootModule().Resources[addr2]
 		if !ok {
-			return fmt.Errorf("Not found: %s", addr2)
+			return fmt.Errorf("not found: %q", addr2)
 		}
 
 		if rs1.Primary.ID == rs2.Primary.ID {
-			return fmt.Errorf("Resources %s and %s have the same ID: %s", addr1, addr2, rs1.Primary.ID)
+			return fmt.Errorf("resources %q and %q have the same ID: %q", addr1, addr2, rs1.Primary.ID)
 		}
 
 		return nil
 	}
 }
 
-func testAccRedshiftGrant_basicCallables_configUserGroup(username, group, _ string) string {
+func testAccRedshiftGrantBasicCallablesConfigUserGroup(username, group, _ string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "user" {
   name = %[1]q
@@ -669,7 +669,7 @@ resource "redshift_group" "group" {
 `, username, group)
 }
 
-func testAccRedshiftGrant_basicCallables_configUserGroupWithGrants(username, group, schema string) string {
+func testAccRedshiftGrantBasicCallablesConfigUserGroupWithGrants(username, group, schema string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "user" {
   name = %[1]q
@@ -717,7 +717,7 @@ resource "redshift_grant" "grant_user_proc" {
 `, username, group, schema)
 }
 
-func testAccRedshiftGrant_basicCallables_createSchemaAndCallables(_ *testing.T, db *DBConnection, schema string) error {
+func testAccRedshiftGrantBasicCallablesCreateSchemaAndCallables(_ *testing.T, db *DBConnection, schema string) error {
 	_, err := db.Exec(fmt.Sprintf("CREATE SCHEMA %s", pq.QuoteIdentifier(schema)))
 	if err != nil {
 		return fmt.Errorf("couldn't create schema: %s", err)
@@ -771,7 +771,7 @@ func testAccRedshiftGrant_basicCallables_createSchemaAndCallables(_ *testing.T, 
 	return nil
 }
 
-func testAccRedshiftGrant_basicCallables_dropResources(_ *testing.T, db *DBConnection, schema string) error {
+func testAccRedshiftGrantBasicCallablesDropResources(_ *testing.T, db *DBConnection, schema string) error {
 	query := fmt.Sprintf("DROP SCHEMA %s CASCADE", pq.QuoteIdentifier(schema))
 	_, err := db.Exec(query)
 	if err != nil {

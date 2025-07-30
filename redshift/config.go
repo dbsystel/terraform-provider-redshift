@@ -139,7 +139,7 @@ func (c *Config) connParams() []string {
 	return paramsArray
 }
 
-// New redshift client
+// Client instantiates a new Redshift client.
 func (c *Config) Client() (*Client, error) {
 
 	conninfo := fmt.Sprintf("sslmode=%v user=%v password=%v host=%v port=%v dbname=%v",

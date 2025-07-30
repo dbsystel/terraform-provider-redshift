@@ -202,11 +202,11 @@ func testAccCheckRedshiftGroupDestroy(s *terraform.State) error {
 		exists, err := checkGroupExists(client, rs.Primary.ID)
 
 		if err != nil {
-			return fmt.Errorf("Error checking role %s", err)
+			return fmt.Errorf("error checking role: %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("Group still exists after destroy")
+			return fmt.Errorf("group still exists after destroy")
 		}
 	}
 
@@ -219,11 +219,11 @@ func testAccCheckRedshiftGroupExists(user string) resource.TestCheckFunc {
 
 		exists, err := checkGroupExists(client, user)
 		if err != nil {
-			return fmt.Errorf("Error checking user %s", err)
+			return fmt.Errorf("error checking user: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Group not found")
+			return fmt.Errorf("group not found")
 		}
 
 		return nil
@@ -241,7 +241,7 @@ func checkGroupExists(client *Client, group string) (bool, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about group: %s", err)
+		return false, fmt.Errorf("error reading info about group: %w", err)
 	}
 
 	return true, nil

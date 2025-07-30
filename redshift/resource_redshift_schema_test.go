@@ -564,11 +564,11 @@ func testAccCheckRedshiftSchemaDestroy(s *terraform.State) error {
 		exists, err := checkSchemaExists(client, rs.Primary.ID)
 
 		if err != nil {
-			return fmt.Errorf("Error checking schema %s", err)
+			return fmt.Errorf("error checking schema %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("Schema still exists after destroy")
+			return fmt.Errorf("schema still exists after destroy")
 		}
 	}
 
@@ -581,11 +581,11 @@ func testAccCheckRedshiftSchemaExists(schema string) resource.TestCheckFunc {
 
 		exists, err := checkSchemaExists(client, schema)
 		if err != nil {
-			return fmt.Errorf("Error checking schema %s", err)
+			return fmt.Errorf("error checking schema: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Schema not found")
+			return fmt.Errorf("schema not found")
 		}
 
 		return nil
@@ -605,7 +605,7 @@ func checkSchemaExists(client *Client, schema string) (bool, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about schema: %s", err)
+		return false, fmt.Errorf("error reading info about schema: %w", err)
 	}
 
 	return true, nil

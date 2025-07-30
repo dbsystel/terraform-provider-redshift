@@ -18,7 +18,7 @@ func TestAccDataSourceRedshiftSchema_basic(t *testing.T) {
 		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceRedshiftSchemaConfig_basic(schemaName),
+				Config: testAccDataSourceRedshiftSchemaConfigBasic(schemaName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.redshift_schema.schema", schemaNameAttr, schemaName),
 					resource.TestCheckResourceAttrSet("data.redshift_schema.schema", schemaOwnerAttr),
@@ -29,7 +29,7 @@ func TestAccDataSourceRedshiftSchema_basic(t *testing.T) {
 	})
 }
 
-func testAccDataSourceRedshiftSchemaConfig_basic(schemaName string) string {
+func testAccDataSourceRedshiftSchemaConfigBasic(schemaName string) string {
 	return fmt.Sprintf(`
 resource "redshift_schema" "schema" {
 	%[1]s = %[2]q

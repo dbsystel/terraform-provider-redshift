@@ -20,7 +20,7 @@ func TestAccResourceRedshiftDatabase_Basic(t *testing.T) {
 		CheckDestroy:      testAccCheckRedshiftDatabaseDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccResourceRedshiftDatabaseConfig_Basic(dbName),
+				Config: testAccResourceRedshiftDatabaseConfigBasic(dbName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckDatabaseExists(dbName),
 					resource.TestCheckResourceAttr("redshift_database.db", databaseNameAttr, dbName),
@@ -37,7 +37,7 @@ func TestAccResourceRedshiftDatabase_Basic(t *testing.T) {
 	})
 }
 
-func testAccResourceRedshiftDatabaseConfig_Basic(dbName string) string {
+func testAccResourceRedshiftDatabaseConfigBasic(dbName string) string {
 	return fmt.Sprintf(`
 resource "redshift_database" "db" {
 	%[1]s = %[2]q 
@@ -107,11 +107,11 @@ func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {
 		exists, err := checkDatabaseExists(client, rs.Primary.ID)
 
 		if err != nil {
-			return fmt.Errorf("Error checking database %s", err)
+			return fmt.Errorf("error checking database: %w", err)
 		}
 
 		if exists {
-			return fmt.Errorf("Database still exists after destroy")
+			return fmt.Errorf("database still exists after destroy")
 		}
 	}
 
@@ -124,11 +124,11 @@ func testAccCheckDatabaseExists(dbName string) resource.TestCheckFunc {
 
 		exists, err := checkDatabaseExists(client, dbName)
 		if err != nil {
-			return fmt.Errorf("Error checking database %w", err)
+			return fmt.Errorf("error checking database: %w", err)
 		}
 
 		if !exists {
-			return fmt.Errorf("Database not found")
+			return fmt.Errorf("database not found")
 		}
 
 		return nil
@@ -146,7 +146,7 @@ func checkDatabaseExists(client *Client, database string) (bool, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about database: %s", err)
+		return false, fmt.Errorf("error reading info about database: %w", err)
 	}
 
 	return true, nil

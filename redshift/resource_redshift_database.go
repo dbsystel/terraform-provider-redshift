@@ -24,10 +24,10 @@ const databaseDatashareSourceWithPermissions = "with_permissions"
 func redshiftDatabase() *schema.Resource {
 	return &schema.Resource{
 		Description:   `Defines a local database.`,
-		CreateContext: RedshiftResourceFunc(resourceRedshiftDatabaseCreate),
-		ReadContext:   RedshiftResourceFunc(resourceRedshiftDatabaseRead),
-		UpdateContext: RedshiftResourceFunc(resourceRedshiftDatabaseUpdate),
-		DeleteContext: RedshiftResourceFunc(resourceRedshiftDatabaseDelete),
+		CreateContext: ResourceFunc(resourceRedshiftDatabaseCreate),
+		ReadContext:   ResourceFunc(resourceRedshiftDatabaseRead),
+		UpdateContext: ResourceFunc(resourceRedshiftDatabaseUpdate),
+		DeleteContext: ResourceFunc(resourceRedshiftDatabaseDelete),
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},

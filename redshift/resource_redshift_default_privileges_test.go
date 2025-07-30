@@ -259,11 +259,11 @@ func testAccCheckDefaultPrivilegesDestory(schemaID, ownerID int, objectType, gro
 			exists, err := checkDefACLExists(client, schemaID, ownerID, objectType, groupName)
 
 			if err != nil {
-				return fmt.Errorf("Error checking role %s", err)
+				return fmt.Errorf("error checking role: %w", err)
 			}
 
 			if exists {
-				return fmt.Errorf("User still exists after destroy")
+				return fmt.Errorf("user still exists after destroy")
 			}
 		}
 
@@ -289,7 +289,7 @@ func checkDefACLExists(client *Client, schemaID, ownerID int, objectType, groupN
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("Error reading info about default ACL: %s", err)
+		return false, fmt.Errorf("error reading info about default ACL: %w", err)
 	}
 
 	return true, nil

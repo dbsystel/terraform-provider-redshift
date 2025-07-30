@@ -46,11 +46,11 @@ func redshiftUser() *schema.Resource {
 		Description: `
 Amazon Redshift user accounts can only be created and dropped by a database superuser. Users are authenticated when they login to Amazon Redshift. They can own databases and database objects (for example, tables) and can grant privileges on those objects to users, groups, and schemas to control who has access to which object. Users with CREATE DATABASE rights can create databases and grant privileges to those databases. Superusers have database ownership privileges for all databases.
 `,
-		CreateContext: RedshiftResourceFunc(resourceRedshiftUserCreate),
-		ReadContext:   RedshiftResourceFunc(resourceRedshiftUserRead),
-		UpdateContext: RedshiftResourceFunc(resourceRedshiftUserUpdate),
-		DeleteContext: RedshiftResourceFunc(
-			RedshiftResourceRetryOnPQErrors(resourceRedshiftUserDelete),
+		CreateContext: ResourceFunc(resourceRedshiftUserCreate),
+		ReadContext:   ResourceFunc(resourceRedshiftUserRead),
+		UpdateContext: ResourceFunc(resourceRedshiftUserUpdate),
+		DeleteContext: ResourceFunc(
+			ResourceRetryOnPQErrors(resourceRedshiftUserDelete),
 		),
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
