@@ -2,7 +2,7 @@
 
 This provider allows to manage with Terraform [AWS Redshift](https://aws.amazon.com/redshift/) objects like users, groups, schemas, etc..
 
-It's published on the [Terraform registry](https://registry.terraform.io/providers/brainly/redshift/latest/docs).
+It's published on the [Terraform registry](https://registry.terraform.io/providers/dbsystel/redshift/latest/docs).
 
 ## Requirements
 
@@ -12,7 +12,7 @@ It's published on the [Terraform registry](https://registry.terraform.io/provide
 ## Building The Provider
 
 ```sh
-$ git clone git@github.com:brainly/terraform-provider-redshift
+$ git clone git@github.com:dbsystel/terraform-provider-redshift
 ```
 
 Enter the provider directory and build the provider
@@ -86,10 +86,10 @@ Currently there are a few manual steps to this:
    ```
 
    Once the command exits, you can monitor the rest of the process on the
-   [Actions UI](https://github.com/brainly/terraform-provider-redshift/actions?query=workflow%3Arelease).
+   [Actions UI](https://github.com/dbsystel/terraform-provider-redshift/actions?query=workflow%3Arelease).
 
 4. Publish release:
 
    The Action creates the release, but leaves it in "draft" state. Open it up in
-   a [browser](https://github.com/brainly/terraform-provider-redshift/releases)
+   a [browser](https://github.com/dbsystel/terraform-provider-redshift/releases)
    and if all looks well, click the publish button.
