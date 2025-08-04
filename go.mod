@@ -32,6 +32,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/redshiftdata v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.26.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.31.0 // indirect
 	github.com/aws/smithy-go v1.22.5 // indirect
@@ -65,6 +66,7 @@ require (
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/huandu/xstrings v1.3.3 // indirect
 	github.com/imdario/mergo v0.3.15 // indirect
+	github.com/mashiike/redshift-data-sql-driver v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
