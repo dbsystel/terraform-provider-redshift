@@ -487,7 +487,7 @@ func TestPermanentUsername(t *testing.T) {
 }
 
 func testAccCheckRedshiftUserCanLogin(user string, password string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
+	return func(s *terraform.State) (err error) {
 		// there doesn't seem to be a good way to extract the provider configuration
 		// at runtime. However we know we've configured the provider with default settings
 		// so we can mimic the same behavior
@@ -517,11 +517,19 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 			MaxConns: defaultProviderMaxOpenConnections,
 		}
 
-		client, err := config.Client()
+		client := config.NewClient(database)
+		var conn *DBConnection
+		conn, err = client.Connect()
 		if err != nil {
 			return fmt.Errorf("user is unable to login: %w", err)
 		}
 		defer client.Close()
-		return nil
+		defer func(conn *DBConnection) {
+			closeErr := conn.Close()
+			if err == nil {
+				err = closeErr
+			}
+		}(conn)
+		return
 	}
 }

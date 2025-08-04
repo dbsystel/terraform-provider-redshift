@@ -595,9 +595,9 @@ func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) erro
 	defer deferredRollback(tx)
 
 	if _, isExternal := d.GetOk(fmt.Sprintf("%s.0.%s", schemaExternalSchemaAttr, "database_name")); isExternal {
-		err = resourceRedshiftSchemaCreateExternal(tx, d)
+		err = resourceRedshiftSchemaCreateExternal(tx, db.DB, d)
 	} else {
-		err = resourceRedshiftSchemaCreateInternal(tx, d)
+		err = resourceRedshiftSchemaCreateInternal(tx, db.DB, d)
 	}
 	if err != nil {
 		return err
@@ -610,7 +610,7 @@ func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) erro
 	return resourceRedshiftSchemaReadImpl(db, d)
 }
 
-func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, d *schema.ResourceData) error {
+func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, db *sql.DB, d *schema.ResourceData) error {
 	schemaName := d.Get(schemaNameAttr).(string)
 	schemaQuota := d.Get(schemaQuotaAttr).(int)
 	var createOpts []string
@@ -632,7 +632,7 @@ func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, d *schema.ResourceData) er
 	}
 
 	var schemaOID string
-	if err := tx.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", strings.ToLower(schemaName)).Scan(&schemaOID); err != nil {
+	if err := db.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", strings.ToLower(schemaName)).Scan(&schemaOID); err != nil {
 		return err
 	}
 
@@ -641,7 +641,7 @@ func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, d *schema.ResourceData) er
 	return nil
 }
 
-func resourceRedshiftSchemaCreateExternal(tx *sql.Tx, d *schema.ResourceData) error {
+func resourceRedshiftSchemaCreateExternal(tx *sql.Tx, db *sql.DB, d *schema.ResourceData) error {
 	schemaName := d.Get(schemaNameAttr).(string)
 	query := fmt.Sprintf("CREATE EXTERNAL SCHEMA %s", pq.QuoteIdentifier(schemaName))
 	sourceDbName := d.Get(fmt.Sprintf("%s.0.%s", schemaExternalSchemaAttr, "database_name")).(string)
@@ -681,7 +681,7 @@ func resourceRedshiftSchemaCreateExternal(tx *sql.Tx, d *schema.ResourceData) er
 	}
 
 	var schemaOID string
-	if err := tx.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", strings.ToLower(schemaName)).Scan(&schemaOID); err != nil {
+	if err := db.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", strings.ToLower(schemaName)).Scan(&schemaOID); err != nil {
 		return err
 	}
 
