@@ -230,7 +230,7 @@ resource "redshift_user" "superuser" {
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
-				ExpectError: regexp.MustCompile("Users that are superusers must define a password."),
+				ExpectError: regexp.MustCompile("users that are superusers must define a password"),
 			},
 		},
 	})
