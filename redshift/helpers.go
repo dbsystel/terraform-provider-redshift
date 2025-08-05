@@ -6,7 +6,6 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -26,39 +25,6 @@ const (
 	pgErrorCodeInsufficientPrivileges = "42501"
 )
 
-// startTransaction starts a new DB transaction on the specified database.
-// If the database is specified and different from the one configured in the provider,
-// it will create a new connection pool if needed.
-func startTransaction(client *Client, database string) (*sql.Tx, error) {
-	if database != "" && database != client.databaseName {
-		client = client.config.NewClient(database)
-	}
-	db, err := client.Connect()
-	if err != nil {
-		return nil, err
-	}
-
-	txn, err := db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("could not start transaction: %w", err)
-	}
-
-	return txn, nil
-}
-
-// deferredRollback can be used to rollback a transaction in a defer.
-// It will log an error if it fails
-func deferredRollback(txn *sql.Tx) {
-	err := txn.Rollback()
-	switch {
-	case errors.Is(err, sql.ErrTxDone):
-		// transaction has already been committed or rolled back
-		log.Printf("[DEBUG]: %v", err)
-	case err != nil:
-		log.Printf("[ERR] could not rollback transaction: %v", err)
-	}
-}
-
 // pqQuoteLiteral returns a string literal safe for inclusion in a PostgreSQL
 // query as a parameter.  The resulting string still needs to be wrapped in
 // single quotes in SQL (i.e. fmt.Sprintf(`'%s'`, pqQuoteLiteral("str"))).  See
@@ -69,18 +35,18 @@ func pqQuoteLiteral(in string) string {
 	return in
 }
 
-func getGroupIDFromName(tx *sql.Tx, group string) (groupID int, err error) {
-	err = tx.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", group).Scan(&groupID)
+func getGroupIDFromName(db *sql.DB, group string) (groupID int, err error) {
+	err = db.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", group).Scan(&groupID)
 	return
 }
 
-func getUserIDFromName(tx *sql.Tx, user string) (userID int, err error) {
-	err = tx.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
+func getUserIDFromName(db *sql.DB, user string) (userID int, err error) {
+	err = db.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
 	return
 }
 
-func getSchemaIDFromName(tx *sql.Tx, schema string) (schemaID int, err error) {
-	err = tx.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", schema).Scan(&schemaID)
+func getSchemaIDFromName(db *sql.DB, schema string) (schemaID int, err error) {
+	err = db.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", schema).Scan(&schemaID)
 	return
 }
 

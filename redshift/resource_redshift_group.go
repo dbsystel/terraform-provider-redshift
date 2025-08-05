@@ -78,12 +78,6 @@ func resourceRedshiftGroupReadImpl(db *DBConnection, d *schema.ResourceData) err
 func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
 	query := fmt.Sprintf("CREATE GROUP %s", pq.QuoteIdentifier(groupName))
 	if v, ok := d.GetOk(groupUsersAttr); ok && len(v.(*schema.Set).List()) > 0 {
 		usernames := v.(*schema.Set).List()
@@ -96,20 +90,16 @@ func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error
 		query = fmt.Sprintf("%s WITH USER %s", query, strings.Join(usernamesSafe, ", "))
 	}
 
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("could not create redshift group: %w", err)
 	}
 
 	var groSysID string
-	if err := tx.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", strings.ToLower(groupName)).Scan(&groSysID); err != nil {
+	if err := db.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", strings.ToLower(groupName)).Scan(&groSysID); err != nil {
 		return fmt.Errorf("could not get redshift group id for %q: %w", groupName, err)
 	}
 
 	d.SetId(groSysID)
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
-	}
 
 	return resourceRedshiftGroupReadImpl(db, d)
 }
@@ -117,13 +107,7 @@ func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error
 func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	rows, err := tx.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
+	rows, err := db.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
 	if err != nil {
 		return err
 	}
@@ -135,44 +119,34 @@ func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error
 			return err
 		}
 
-		if _, err := tx.Exec(fmt.Sprintf("REVOKE ALL ON ALL TABLES IN SCHEMA %s FROM GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName))); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("REVOKE ALL ON ALL TABLES IN SCHEMA %s FROM GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName))); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA %s REVOKE ALL ON TABLES FROM GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName))); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA %s REVOKE ALL ON TABLES FROM GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName))); err != nil {
 			return err
 		}
 	}
 
-	if _, err := tx.Exec(fmt.Sprintf("DROP GROUP %s", pq.QuoteIdentifier(groupName))); err != nil {
+	if _, err := db.Exec(fmt.Sprintf("DROP GROUP %s", pq.QuoteIdentifier(groupName))); err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func resourceRedshiftGroupUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	if err := setGroupName(tx, d); err != nil {
+	if err := setGroupName(db, d); err != nil {
 		return err
 	}
 
-	if err := setUsersNames(tx, db, d); err != nil {
+	if err := setUsersNames(db, d); err != nil {
 		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return resourceRedshiftGroupReadImpl(db, d)
 }
 
-func setGroupName(tx *sql.Tx, d *schema.ResourceData) error {
+func setGroupName(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(groupNameAttr) {
 		return nil
 	}
@@ -186,17 +160,17 @@ func setGroupName(tx *sql.Tx, d *schema.ResourceData) error {
 	}
 
 	query := fmt.Sprintf("ALTER GROUP %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("error updating Group NAME: %w", err)
 	}
 
 	return nil
 }
 
-func checkIfUserExists(tx *sql.Tx, name string) (bool, error) {
+func checkIfUserExists(db *sql.DB, name string) (bool, error) {
 
 	var result int
-	err := tx.QueryRow("SELECT 1 FROM pg_user_info WHERE usename=$1", name).Scan(&result)
+	err := db.QueryRow("SELECT 1 FROM pg_user_info WHERE usename=$1", name).Scan(&result)
 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -208,7 +182,7 @@ func checkIfUserExists(tx *sql.Tx, name string) (bool, error) {
 	return true, nil
 }
 
-func setUsersNames(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
+func setUsersNames(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(groupUsersAttr) {
 		return nil
 	}
@@ -221,7 +195,7 @@ func setUsersNames(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 	if removedUsers.Len() > 0 {
 		var removedUsersNamesSafe []string
 		for _, name := range removedUsers.List() {
-			userExists, err := checkIfUserExists(tx, name.(string))
+			userExists, err := checkIfUserExists(db.DB, name.(string))
 			if err != nil {
 				return err
 			}
@@ -234,7 +208,7 @@ func setUsersNames(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 		if len(removedUsersNamesSafe) > 0 {
 			query := fmt.Sprintf("ALTER GROUP %s DROP USER %s", pq.QuoteIdentifier(groupName), strings.Join(removedUsersNamesSafe, ", "))
 
-			if _, err := tx.Exec(query); err != nil {
+			if _, err := db.Exec(query); err != nil {
 				return err
 			}
 		}
@@ -248,7 +222,7 @@ func setUsersNames(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 
 		query := fmt.Sprintf("ALTER GROUP %s ADD USER %s", pq.QuoteIdentifier(groupName), strings.Join(addedUsersNamesSafe, ", "))
 
-		if _, err := tx.Exec(query); err != nil {
+		if _, err := db.Exec(query); err != nil {
 			return err
 		}
 	}

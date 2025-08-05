@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
 	_ "github.com/lib/pq"
+	_ "github.com/mashiike/redshift-data-sql-driver"
 )
 
 var (
@@ -90,9 +92,20 @@ func (c *Client) Connect() (*DBConnection, error) {
 	dsn := c.config.connStr(c.databaseName)
 	conn, found := dbRegistry[dsn]
 	if !found {
-		db, err := sql.Open(proxyDriverName, dsn)
-		if err != nil {
-			return nil, fmt.Errorf("error connecting to PostgreSQL server %q: %w", c.config.Host, err)
+		// todo: put values into config struct
+		workgroupName, ok := os.LookupEnv("SERVERLESS_WORKGROUP_NAME")
+		var db *sql.DB
+		var err error
+		if !ok {
+			db, err = sql.Open(proxyDriverName, dsn)
+			if err != nil {
+				return nil, fmt.Errorf("error connecting to Redshift server %q: %w", c.config.Host, err)
+			}
+		} else {
+			db, err = sql.Open("redshift-data", fmt.Sprintf("workgroup(%s)/%s?timeout=1m&region=eu-central-1", workgroupName, c.config.Database))
+			if err != nil {
+				return nil, fmt.Errorf("error connecting to redshift workgroup %q: %w", workgroupName, err)
+			}
 		}
 
 		// We don't want to retain connection
@@ -137,30 +150,6 @@ func (c *Config) connParams() []string {
 	}
 
 	return paramsArray
-}
-
-// Client instantiates a new Redshift client.
-func (c *Config) Client() (*Client, error) {
-
-	conninfo := fmt.Sprintf("sslmode=%v user=%v password=%v host=%v port=%v dbname=%v",
-		c.SSLMode,
-		c.Username,
-		c.Password,
-		c.Host,
-		c.Port,
-		c.Database)
-
-	db, err := sql.Open(proxyDriverName, conninfo)
-	if err != nil {
-		return nil, err
-	}
-
-	client := Client{
-		config: *c,
-		db:     db,
-	}
-
-	return &client, nil
 }
 
 func (c *Client) Close() {
