@@ -101,4 +101,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/mashiike/redshift-data-sql-driver => github.com/mmichaelb/redshift-data-sql-driver v0.0.1
+replace github.com/mashiike/redshift-data-sql-driver => github.com/mmichaelb/redshift-data-sql-driver v0.0.2
