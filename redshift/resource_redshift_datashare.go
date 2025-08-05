@@ -97,17 +97,11 @@ such as RA3.
 }
 
 func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
 	shareName := d.Get(dataShareNameAttr).(string)
 
 	query := fmt.Sprintf("CREATE DATASHARE %s SET PUBLICACCESSIBLE = %t", pq.QuoteIdentifier(shareName), d.Get(dataSharePublicAccessibleAttr).(bool))
 	log.Printf("[DEBUG] %s\n", query)
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return err
 	}
 
@@ -123,43 +117,39 @@ func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) e
 	if owner, ownerIsSet := d.GetOk(dataShareOwnerAttr); ownerIsSet {
 		query = fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(strings.ToLower(shareName)), pq.QuoteIdentifier(strings.ToLower(owner.(string))))
 		log.Printf("[DEBUG] %s\n", query)
-		_, err = tx.Exec(query)
+		_, err := db.Exec(query)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, dataShareSchema := range d.Get(dataShareSchemasAttr).(*schema.Set).List() {
-		err = addSchemaToDatashare(tx, shareName, dataShareSchema.(string))
+		err := addSchemaToDatashare(db, shareName, dataShareSchema.(string))
 		if err != nil {
 			return err
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
-	}
-
 	return resourceRedshiftDatashareRead(db, d)
 }
 
-func addSchemaToDatashare(tx *sql.Tx, shareName string, schemaName string) error {
-	err := resourceRedshiftDatashareAddSchema(tx, shareName, schemaName)
+func addSchemaToDatashare(db *DBConnection, shareName string, schemaName string) error {
+	err := resourceRedshiftDatashareAddSchema(db, shareName, schemaName)
 	if err != nil {
 		return err
 	}
-	err = resourceRedshiftDatashareAddAllTables(tx, shareName, schemaName)
+	err = resourceRedshiftDatashareAddAllTables(db, shareName, schemaName)
 	if err != nil {
 		return err
 	}
-	err = resourceRedshiftDatashareAddAllFunctions(tx, shareName, schemaName)
+	err = resourceRedshiftDatashareAddAllFunctions(db, shareName, schemaName)
 	return err
 }
 
-func resourceRedshiftDatashareAddSchema(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareAddSchema(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s ADD SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	if err != nil {
 		// if the schema is already in the datashare we get a "duplicate schema" error code. This is fine.
 		var pqErr *pq.Error
@@ -175,55 +165,55 @@ func resourceRedshiftDatashareAddSchema(tx *sql.Tx, shareName string, schemaName
 	}
 	query = fmt.Sprintf("ALTER DATASHARE %s SET INCLUDENEW = TRUE FOR SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err = tx.Exec(query)
+	_, err = db.Exec(query)
 	return err
 }
 
-func resourceRedshiftDatashareAddAllFunctions(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareAddAllFunctions(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s ADD ALL FUNCTIONS IN SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 
-func resourceRedshiftDatashareAddAllTables(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareAddAllTables(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s ADD ALL TABLES IN SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 
-func removeSchemaFromDatashare(tx *sql.Tx, shareName string, schemaName string) error {
-	err := resourceRedshiftDatashareRemoveAllFunctions(tx, shareName, schemaName)
+func removeSchemaFromDatashare(db *DBConnection, shareName string, schemaName string) error {
+	err := resourceRedshiftDatashareRemoveAllFunctions(db, shareName, schemaName)
 	if err != nil {
 		return err
 	}
-	err = resourceRedshiftDatashareRemoveAllTables(tx, shareName, schemaName)
+	err = resourceRedshiftDatashareRemoveAllTables(db, shareName, schemaName)
 	if err != nil {
 		return err
 	}
-	err = resourceRedshiftDatashareRemoveSchema(tx, shareName, schemaName)
+	err = resourceRedshiftDatashareRemoveSchema(db, shareName, schemaName)
 	return err
 }
 
-func resourceRedshiftDatashareRemoveAllFunctions(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareRemoveAllFunctions(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s REMOVE ALL FUNCTIONS IN SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 
-func resourceRedshiftDatashareRemoveAllTables(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareRemoveAllTables(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s REMOVE ALL TABLES IN SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 
-func resourceRedshiftDatashareRemoveSchema(tx *sql.Tx, shareName string, schemaName string) error {
+func resourceRedshiftDatashareRemoveSchema(db *DBConnection, shareName string, schemaName string) error {
 	query := fmt.Sprintf("ALTER DATASHARE %s REMOVE SCHEMA %s", pq.QuoteIdentifier(shareName), pq.QuoteIdentifier(schemaName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	if err != nil {
 		// if the schema is not already in the datashare we get a "datashare does not contain schema" error code. This is fine.
 		var pqErr *pq.Error
@@ -242,12 +232,6 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	var shareName, owner, producerAccount, producerNamespace, created string
 	var publicAccessible bool
 
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
 	query := `
 	SELECT
 		TRIM(svv_datashares.share_name),
@@ -261,7 +245,7 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	WHERE share_type = 'OUTBOUND'
 	AND share_id = $1`
 	log.Printf("[DEBUG] %s, $1=%s\n", query, d.Id())
-	err = db.QueryRow(query, d.Id()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created)
+	err := db.QueryRow(query, d.Id()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created)
 	if err != nil {
 		return err
 	}
@@ -274,10 +258,6 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	d.Set(dataShareCreatedAttr, created)
 
 	if err = readDatashareSchemas(db.DB, shareName, d); err != nil {
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
 		return err
 	}
 
@@ -313,28 +293,22 @@ func readDatashareSchemas(db *sql.DB, shareName string, d *schema.ResourceData) 
 }
 
 func resourceRedshiftDatashareUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	if err := setDatashareOwner(tx, d); err != nil {
+	if err := setDatashareOwner(db, d); err != nil {
 		return err
 	}
 
-	if err := setDatasharePubliclyAccessble(tx, d); err != nil {
+	if err := setDatasharePubliclyAccessble(db, d); err != nil {
 		return err
 	}
 
-	if err := setDatashareSchemas(tx, d); err != nil {
+	if err := setDatashareSchemas(db, d); err != nil {
 		return err
 	}
 
 	return resourceRedshiftDatashareRead(db, d)
 }
 
-func setDatashareOwner(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatashareOwner(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(dataShareOwnerAttr) {
 		return nil
 	}
@@ -349,13 +323,13 @@ func setDatashareOwner(tx *sql.Tx, d *schema.ResourceData) error {
 
 	query := fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(shareName), newValue)
 	log.Printf("[DEBUG] %s\n", query)
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("error updating datashare OWNER: %w", err)
 	}
 	return nil
 }
 
-func setDatasharePubliclyAccessble(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatasharePubliclyAccessble(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(dataSharePublicAccessibleAttr) {
 		return nil
 	}
@@ -364,13 +338,13 @@ func setDatasharePubliclyAccessble(tx *sql.Tx, d *schema.ResourceData) error {
 	newValue := d.Get(dataSharePublicAccessibleAttr).(bool)
 	query := fmt.Sprintf("ALTER DATASHARE %s SET PUBLICACCESSIBLE %t", pq.QuoteIdentifier(shareName), newValue)
 	log.Printf("[DEBUG] %s\n", query)
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("error updating datashare PUBLICACCESSBILE: %w", err)
 	}
 	return nil
 }
 
-func setDatashareSchemas(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatashareSchemas(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(dataShareSchemasAttr) {
 		return nil
 	}
@@ -387,12 +361,12 @@ func setDatashareSchemas(tx *sql.Tx, d *schema.ResourceData) error {
 
 	shareName := d.Get(dataShareNameAttr).(string)
 	for _, s := range add.List() {
-		if err := addSchemaToDatashare(tx, shareName, s.(string)); err != nil {
+		if err := addSchemaToDatashare(db, shareName, s.(string)); err != nil {
 			return err
 		}
 	}
 	for _, s := range remove.List() {
-		if err := removeSchemaFromDatashare(tx, shareName, s.(string)); err != nil {
+		if err := removeSchemaFromDatashare(db, shareName, s.(string)); err != nil {
 			return err
 		}
 	}

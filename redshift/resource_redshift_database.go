@@ -1,7 +1,6 @@
 package redshift
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -138,19 +137,11 @@ func resourceRedshiftDatabaseCreateFromDatashare(db *DBConnection, d *schema.Res
 	}
 	d.SetId(oid)
 
-	// CREATE DATABASE isn't allowed to run inside a transaction, however ALTER DATABASE
-	// can be
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
 	// CREATE DATABASE FROM DATASHARE... doesn't allow you to specify an owner in the create statement,
 	// so we need to set the owner after creation using ALTER DATABASE...
 	owner, ownerIsSet := d.GetOk(databaseOwnerAttr)
 	if ownerIsSet {
-		if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(owner.(string)))); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(owner.(string)))); err != nil {
 			return err
 		}
 	}
@@ -159,12 +150,9 @@ func resourceRedshiftDatabaseCreateFromDatashare(db *DBConnection, d *schema.Res
 	// so we need to set the owner after creation using ALTER DATABASE...
 	connLimit, connLimitIsSet := d.GetOk(databaseConnLimitAttr)
 	if connLimitIsSet {
-		if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(dbName), connLimit.(int))); err != nil {
+		if _, err := db.Exec(fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(dbName), connLimit.(int))); err != nil {
 			return err
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
 	}
 
 	return resourceRedshiftDatabaseRead(db, d)
@@ -251,32 +239,22 @@ WHERE pg_database_info.datid = $1
 }
 
 func resourceRedshiftDatabaseUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	if err := setDatabaseName(tx, d); err != nil {
+	if err := setDatabaseName(db, d); err != nil {
 		return err
 	}
 
-	if err := setDatabaseOwner(tx, d); err != nil {
+	if err := setDatabaseOwner(db, d); err != nil {
 		return err
 	}
 
-	if err := setDatabaseConnLimit(tx, d); err != nil {
+	if err := setDatabaseConnLimit(db, d); err != nil {
 		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return resourceRedshiftDatabaseRead(db, d)
 }
 
-func setDatabaseName(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatabaseName(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(databaseNameAttr) {
 		return nil
 	}
@@ -291,14 +269,14 @@ func setDatabaseName(tx *sql.Tx, d *schema.ResourceData) error {
 
 	query := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
 	log.Printf("[DEBUG] renaming database %s to %s: %s\n", oldValue, newValue, query)
-	if _, err := tx.Exec(query); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("error updating database NAME: %w", err)
 	}
 
 	return nil
 }
 
-func setDatabaseOwner(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatabaseOwner(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(databaseOwnerAttr) {
 		return nil
 	}
@@ -308,11 +286,11 @@ func setDatabaseOwner(tx *sql.Tx, d *schema.ResourceData) error {
 
 	query := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(databaseOwner))
 	log.Printf("[DEBUG] changing database owner: %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 
-func setDatabaseConnLimit(tx *sql.Tx, d *schema.ResourceData) error {
+func setDatabaseConnLimit(db *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(databaseConnLimitAttr) {
 		return nil
 	}
@@ -321,7 +299,7 @@ func setDatabaseConnLimit(tx *sql.Tx, d *schema.ResourceData) error {
 	connLimit := d.Get(databaseConnLimitAttr).(int)
 	query := fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(databaseName), connLimit)
 	log.Printf("[DEBUG] changing database connection limit: %s\n", query)
-	_, err := tx.Exec(query)
+	_, err := db.Exec(query)
 	return err
 }
 

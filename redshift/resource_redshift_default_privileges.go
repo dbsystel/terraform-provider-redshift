@@ -99,17 +99,10 @@ func redshiftDefaultPrivileges() *schema.Resource {
 func resourceRedshiftDefaultPrivilegesDelete(db *DBConnection, d *schema.ResourceData) error {
 	revokeAlterDefaultQuery := createAlterDefaultsRevokeQuery(d)
 
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
+	if _, err := db.Exec(revokeAlterDefaultQuery); err != nil {
 		return err
 	}
-	defer deferredRollback(tx)
-
-	if _, err := tx.Exec(revokeAlterDefaultQuery); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 func resourceRedshiftDefaultPrivilegesCreate(db *DBConnection, d *schema.ResourceData) error {
@@ -125,26 +118,16 @@ func resourceRedshiftDefaultPrivilegesCreate(db *DBConnection, d *schema.Resourc
 		return fmt.Errorf(`invalid privileges list %+v for object type %q`, privileges, objectType)
 	}
 
-	tx, err := startTransaction(db.client, "")
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
 	revokeAlterDefaultQuery := createAlterDefaultsRevokeQuery(d)
-	if _, err := tx.Exec(revokeAlterDefaultQuery); err != nil {
+	if _, err := db.Exec(revokeAlterDefaultQuery); err != nil {
 		return err
 	}
 
 	if len(privileges) > 0 {
 		alterDefaultQuery := createAlterDefaultsGrantQuery(d, privileges)
-		if _, err := tx.Exec(alterDefaultQuery); err != nil {
+		if _, err := db.Exec(alterDefaultQuery); err != nil {
 			return err
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
 	}
 
 	d.SetId(generateDefaultPrivilegesID(d))
