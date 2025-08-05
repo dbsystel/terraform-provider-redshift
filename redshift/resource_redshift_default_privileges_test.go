@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
+	rootUsername := getRootUsername()
 
 	for i, groupName := range groupNames {
 		userName := userNames[i]
@@ -37,18 +39,18 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 		
 		resource "redshift_default_privileges" "group" {
 		  group = redshift_group.group.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
 		
 		resource "redshift_default_privileges" "user" {
 		  user = redshift_user.user.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
-		`, groupName, userName)
+		`, groupName, userName, rootUsername)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { testAccPreCheck(t) },
 			ProviderFactories: testAccProviders,
@@ -98,6 +100,7 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
+	rootUsername := getRootUsername()
 
 	for i, groupName := range groupNames {
 		userName := userNames[i]
@@ -113,18 +116,18 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		
 		resource "redshift_default_privileges" "group" {
 		  group = redshift_group.group.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
 		
 		resource "redshift_default_privileges" "user" {
 		  user = redshift_user.user.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
-		`, groupName, userName)
+		`, groupName, userName, rootUsername)
 
 		configUpdated := fmt.Sprintf(`
 		resource "redshift_group" "group" {
@@ -138,18 +141,18 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		
 		resource "redshift_default_privileges" "group" {
 		  group = redshift_group.group.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = []
 		}
 		
 		resource "redshift_default_privileges" "user" {
 		  user = redshift_user.user.name
-		  owner = "root"
+		  owner = %[3]q
 		  object_type = "table"
 		  privileges = []
 		}
-		`, groupName, userName)
+		`, groupName, userName, rootUsername)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { testAccPreCheck(t) },
 			ProviderFactories: testAccProviders,
@@ -205,16 +208,17 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 }
 
 func TestAccRedshiftDefaultPrivileges_BothUserGroupError(t *testing.T) {
-	config := `
+	rootUsername := getRootUsername()
+	config := fmt.Sprintf(`
 resource "redshift_default_privileges" "both" {
   user = "test_user"
   group = "test_group"
 
-  owner = "root"
+  owner = %[1]q
   object_type = "table"
   privileges = []
 }
-`
+`, rootUsername)
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviders,
@@ -228,13 +232,14 @@ resource "redshift_default_privileges" "both" {
 }
 
 func TestAccRedshiftDefaultPrivileges_NoUserGroupError(t *testing.T) {
-	config := `
+	rootUsername := getRootUsername()
+	config := fmt.Sprintf(`
 resource "redshift_default_privileges" "none" {
-  owner = "root"
+  owner = %[1]q
   object_type = "table"
   privileges = []
 }
-`
+`, rootUsername)
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviders,
@@ -293,4 +298,12 @@ func checkDefACLExists(client *Client, schemaID, ownerID int, objectType, groupN
 	}
 
 	return true, nil
+}
+
+func getRootUsername() string {
+	envRootUsername := os.Getenv("REDSHIFT_ROOT_USERNAME")
+	if envRootUsername == "" {
+		return "root"
+	}
+	return envRootUsername
 }
