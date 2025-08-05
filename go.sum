@@ -189,8 +189,7 @@ github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RR
 github.com/mitchellh/reflectwalk v1.0.0/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
 github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=
 github.com/mitchellh/reflectwalk v1.0.2/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
-github.com/mmichaelb/redshift-data-sql-driver v0.0.1 h1:sl1dA7GgmwtMAg7ET3qyLc51JWuX7VaS8XKBLny8Gj4=
-github.com/mmichaelb/redshift-data-sql-driver v0.0.1/go.mod h1:X1KwG24kLnavNul+xMDnOGEEQLd1UTgnydzXTrjkCZQ=
+github.com/mmichaelb/redshift-data-sql-driver v0.0.2 h1:KDTnCBYFCUxnge5auEdP03PbhIHe2djC9izblW6YBOE=
 github.com/mmichaelb/redshift-data-sql-driver v0.0.2/go.mod h1:X1KwG24kLnavNul+xMDnOGEEQLd1UTgnydzXTrjkCZQ=
 github.com/oklog/run v1.0.0 h1:Ru7dDtJNOyC66gQ5dQmaCa0qIsAUFY3sFpK1Xk8igrw=
 github.com/oklog/run v1.0.0/go.mod h1:dlhp/R75TPv97u0XWUtDeV/lRKWPKSdTuV0TZvrmrQA=
