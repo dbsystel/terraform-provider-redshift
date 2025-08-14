@@ -162,11 +162,16 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	schemaName, schemaNameSet := d.GetOk(defaultPrivilegesSchemaAttr)
 	ownerName := d.Get(defaultPrivilegesOwnerAttr).(string)
 
-	var err error
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
 	schemaID := defaultPrivilegesAllSchemasID
 	if schemaNameSet {
 		log.Printf("[DEBUG] getting ID for schema %s\n", schemaName)
-		schemaID, err = getSchemaIDFromName(db.DB, schemaName.(string))
+		schemaID, err = getSchemaIDFromName(tx, schemaName.(string))
 		if err != nil {
 			return fmt.Errorf("failed to get schema ID for schema '%s': %w", schemaName, err)
 		}
@@ -174,14 +179,14 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 
 	if groupName, groupNameSet := d.GetOk(defaultPrivilegesGroupAttr); groupNameSet {
 		log.Printf("[DEBUG] getting ID for group %s\n", groupName.(string))
-		entityID, err = getGroupIDFromName(db.DB, groupName.(string))
+		entityID, err = getGroupIDFromName(tx, groupName.(string))
 		entityIsUser = false
 		if err != nil {
 			return fmt.Errorf("failed to get group ID: %w", err)
 		}
 	} else if userName, userNameSet := d.GetOk(defaultPrivilegesUserAttr); userNameSet {
 		log.Printf("[DEBUG] getting ID for user %s\n", userName.(string))
-		entityID, err = getUserIDFromName(db.DB, userName.(string))
+		entityID, err = getUserIDFromName(tx, userName.(string))
 		entityIsUser = true
 		if err != nil {
 			return fmt.Errorf("failed to get user ID: %w", err)
@@ -189,7 +194,7 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	}
 
 	log.Printf("[DEBUG] getting ID for owner %s\n", ownerName)
-	ownerID, err := getUserIDFromName(db.DB, ownerName)
+	ownerID, err := getUserIDFromName(tx, ownerName)
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
@@ -197,15 +202,19 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	switch strings.ToUpper(d.Get(defaultPrivilegesObjectTypeAttr).(string)) {
 	case "TABLE":
 		log.Println("[DEBUG] reading default privileges")
-		if err := readGroupTableDefaultPrivileges(db.DB, d, entityID, schemaID, ownerID, entityIsUser); err != nil {
+		if err := readGroupTableDefaultPrivileges(tx, d, entityID, schemaID, ownerID, entityIsUser); err != nil {
 			return fmt.Errorf("failed to read table privileges: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return nil
 }
 
-func readGroupTableDefaultPrivileges(db *sql.DB, d *schema.ResourceData, entityID, schemaID, ownerID int, entityIsUser bool) error {
+func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, entityID, schemaID, ownerID int, entityIsUser bool) error {
 	var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableRule, tableTrigger bool
 	var query string
 
@@ -249,7 +258,7 @@ func readGroupTableDefaultPrivileges(db *sql.DB, d *schema.ResourceData, entityI
 		`
 	}
 
-	if err := db.QueryRow(query, schemaID, entityID, defaultPrivilegesObjectTypesCodes["table"], ownerID).Scan(
+	if err := tx.QueryRow(query, schemaID, entityID, defaultPrivilegesObjectTypesCodes["table"], ownerID).Scan(
 		&tableSelect,
 		&tableUpdate,
 		&tableInsert,

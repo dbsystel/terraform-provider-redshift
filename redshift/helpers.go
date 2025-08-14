@@ -69,18 +69,18 @@ func pqQuoteLiteral(in string) string {
 	return in
 }
 
-func getGroupIDFromName(db *sql.DB, group string) (groupID int, err error) {
-	err = db.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", group).Scan(&groupID)
+func getGroupIDFromName(tx *sql.Tx, group string) (groupID int, err error) {
+	err = tx.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", group).Scan(&groupID)
 	return
 }
 
-func getUserIDFromName(db *sql.DB, user string) (userID int, err error) {
-	err = db.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
+func getUserIDFromName(tx *sql.Tx, user string) (userID int, err error) {
+	err = tx.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
 	return
 }
 
-func getSchemaIDFromName(db *sql.DB, schema string) (schemaID int, err error) {
-	err = db.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", schema).Scan(&schemaID)
+func getSchemaIDFromName(tx *sql.Tx, schema string) (schemaID int, err error) {
+	err = tx.QueryRow("SELECT oid FROM pg_namespace WHERE nspname = $1", schema).Scan(&schemaID)
 	return
 }
 
