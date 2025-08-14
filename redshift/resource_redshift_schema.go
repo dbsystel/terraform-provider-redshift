@@ -567,6 +567,11 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 }
 
 func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) error {
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
 	schemaName := d.Get(schemaNameAttr).(string)
 
 	cascadeOrRestrict := "RESTRICT"
@@ -575,28 +580,37 @@ func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) erro
 	}
 
 	query := fmt.Sprintf("DROP SCHEMA %s %s", pq.QuoteIdentifier(schemaName), cascadeOrRestrict)
-	if _, err := db.Exec(query); err != nil {
+	if _, err := tx.Exec(query); err != nil {
 		return err
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) error {
-	var err error
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
 	if _, isExternal := d.GetOk(fmt.Sprintf("%s.0.%s", schemaExternalSchemaAttr, "database_name")); isExternal {
-		err = resourceRedshiftSchemaCreateExternal(db, d)
+		err = resourceRedshiftSchemaCreateExternal(tx, db.DB, d)
 	} else {
-		err = resourceRedshiftSchemaCreateInternal(db, d)
+		err = resourceRedshiftSchemaCreateInternal(tx, db.DB, d)
 	}
 	if err != nil {
 		return err
 	}
 
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
+	}
+
 	return resourceRedshiftSchemaReadImpl(db, d)
 }
 
-func resourceRedshiftSchemaCreateInternal(db *DBConnection, d *schema.ResourceData) error {
+func resourceRedshiftSchemaCreateInternal(tx *sql.Tx, db *sql.DB, d *schema.ResourceData) error {
 	schemaName := d.Get(schemaNameAttr).(string)
 	schemaQuota := d.Get(schemaQuotaAttr).(int)
 	var createOpts []string
@@ -613,7 +627,7 @@ func resourceRedshiftSchemaCreateInternal(db *DBConnection, d *schema.ResourceDa
 
 	query := fmt.Sprintf("CREATE SCHEMA %s %s", pq.QuoteIdentifier(schemaName), strings.Join(createOpts, " "))
 
-	if _, err := db.Exec(query); err != nil {
+	if _, err := tx.Exec(query); err != nil {
 		return err
 	}
 
@@ -627,7 +641,7 @@ func resourceRedshiftSchemaCreateInternal(db *DBConnection, d *schema.ResourceDa
 	return nil
 }
 
-func resourceRedshiftSchemaCreateExternal(db *DBConnection, d *schema.ResourceData) error {
+func resourceRedshiftSchemaCreateExternal(tx *sql.Tx, db *sql.DB, d *schema.ResourceData) error {
 	schemaName := d.Get(schemaNameAttr).(string)
 	query := fmt.Sprintf("CREATE EXTERNAL SCHEMA %s", pq.QuoteIdentifier(schemaName))
 	sourceDbName := d.Get(fmt.Sprintf("%s.0.%s", schemaExternalSchemaAttr, "database_name")).(string)
@@ -654,14 +668,14 @@ func resourceRedshiftSchemaCreateExternal(db *DBConnection, d *schema.ResourceDa
 	query = fmt.Sprintf("%s %s", query, configQuery)
 
 	log.Printf("[DEBUG] creating external schema: %s\n", query)
-	if _, err := db.Exec(query); err != nil {
+	if _, err := tx.Exec(query); err != nil {
 		return err
 	}
 
 	if v, ok := d.GetOk(schemaOwnerAttr); ok {
 		query = fmt.Sprintf("ALTER SCHEMA %s OWNER TO %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(v.(string)))
 		log.Printf("[DEBUG] setting schema owner: %s\n", query)
-		if _, err := db.Exec(query); err != nil {
+		if _, err := tx.Exec(query); err != nil {
 			return err
 		}
 	}
@@ -766,22 +780,32 @@ func getRedshiftConfigQueryPart(d *schema.ResourceData, sourceDbName string) str
 }
 
 func resourceRedshiftSchemaUpdate(db *DBConnection, d *schema.ResourceData) error {
-	if err := setSchemaName(db, d); err != nil {
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
+	if err := setSchemaName(tx, d); err != nil {
 		return err
 	}
 
-	if err := setSchemaOwner(db, db, d); err != nil {
+	if err := setSchemaOwner(tx, db, d); err != nil {
 		return err
 	}
 
-	if err := setSchemaQuota(db, d); err != nil {
+	if err := setSchemaQuota(tx, d); err != nil {
 		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return resourceRedshiftSchemaReadImpl(db, d)
 }
 
-func setSchemaName(db *DBConnection, d *schema.ResourceData) error {
+func setSchemaName(tx *sql.Tx, d *schema.ResourceData) error {
 	if !d.HasChange(schemaNameAttr) {
 		return nil
 	}
@@ -795,14 +819,14 @@ func setSchemaName(db *DBConnection, d *schema.ResourceData) error {
 	}
 
 	query := fmt.Sprintf("ALTER SCHEMA %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
-	if _, err := db.Exec(query); err != nil {
+	if _, err := tx.Exec(query); err != nil {
 		return fmt.Errorf("error updating schema NAME: %w", err)
 	}
 
 	return nil
 }
 
-func setSchemaOwner(db *DBConnection, _ *DBConnection, d *schema.ResourceData) error {
+func setSchemaOwner(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(schemaOwnerAttr) {
 		return nil
 	}
@@ -810,11 +834,11 @@ func setSchemaOwner(db *DBConnection, _ *DBConnection, d *schema.ResourceData) e
 	schemaName := d.Get(schemaNameAttr).(string)
 	schemaOwner := d.Get(schemaOwnerAttr).(string)
 
-	_, err := db.Exec(fmt.Sprintf("ALTER SCHEMA %s OWNER TO %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(schemaOwner)))
+	_, err := tx.Exec(fmt.Sprintf("ALTER SCHEMA %s OWNER TO %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(schemaOwner)))
 	return err
 }
 
-func setSchemaQuota(db *DBConnection, d *schema.ResourceData) error {
+func setSchemaQuota(tx *sql.Tx, d *schema.ResourceData) error {
 	if !d.HasChange(schemaQuotaAttr) {
 		return nil
 	}
@@ -827,6 +851,6 @@ func setSchemaQuota(db *DBConnection, d *schema.ResourceData) error {
 		quotaValue = fmt.Sprintf("%d GB", schemaQuota)
 	}
 
-	_, err := db.Exec(fmt.Sprintf("ALTER SCHEMA %s QUOTA %s", pq.QuoteIdentifier(schemaName), quotaValue))
+	_, err := tx.Exec(fmt.Sprintf("ALTER SCHEMA %s QUOTA %s", pq.QuoteIdentifier(schemaName), quotaValue))
 	return err
 }
