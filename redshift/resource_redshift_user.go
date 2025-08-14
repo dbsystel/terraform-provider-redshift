@@ -238,7 +238,7 @@ func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error 
 	}
 
 	var usesysid string
-	if err := db.QueryRow("SELECT usesysid FROM pg_user_info WHERE usename = $1", userName).Scan(&usesysid); err != nil {
+	if err := tx.QueryRow("SELECT usesysid FROM pg_user_info WHERE usename = $1", userName).Scan(&usesysid); err != nil {
 		return fmt.Errorf("user does not exist in pg_user_info table: %w", err)
 	}
 
@@ -371,7 +371,7 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 			OWNER("userid", "ddl")
 			WHERE owner.userid = $1;`
 
-	rows, err := db.Query(reassignOwnerGenerator, useSysID, pq.QuoteIdentifier(newOwnerName))
+	rows, err := tx.Query(reassignOwnerGenerator, useSysID, pq.QuoteIdentifier(newOwnerName))
 	if err != nil {
 		return err
 	}
@@ -394,7 +394,7 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 		}
 	}
 
-	rows, err = db.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
+	rows, err = tx.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
 	if err != nil {
 		return err
 	}

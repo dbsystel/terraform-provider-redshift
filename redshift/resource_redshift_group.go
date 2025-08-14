@@ -101,7 +101,7 @@ func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error
 	}
 
 	var groSysID string
-	if err := db.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", strings.ToLower(groupName)).Scan(&groSysID); err != nil {
+	if err := tx.QueryRow("SELECT grosysid FROM pg_group WHERE groname = $1", strings.ToLower(groupName)).Scan(&groSysID); err != nil {
 		return fmt.Errorf("could not get redshift group id for %q: %w", groupName, err)
 	}
 
@@ -123,7 +123,7 @@ func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error
 	}
 	defer deferredRollback(tx)
 
-	rows, err := db.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
+	rows, err := tx.Query("SELECT nspname FROM pg_namespace WHERE nspowner != 1 OR nspname = 'public'")
 	if err != nil {
 		return err
 	}
@@ -193,10 +193,10 @@ func setGroupName(tx *sql.Tx, d *schema.ResourceData) error {
 	return nil
 }
 
-func checkIfUserExists(db *sql.DB, name string) (bool, error) {
+func checkIfUserExists(tx *sql.Tx, name string) (bool, error) {
 
 	var result int
-	err := db.QueryRow("SELECT 1 FROM pg_user_info WHERE usename=$1", name).Scan(&result)
+	err := tx.QueryRow("SELECT 1 FROM pg_user_info WHERE usename=$1", name).Scan(&result)
 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -208,7 +208,7 @@ func checkIfUserExists(db *sql.DB, name string) (bool, error) {
 	return true, nil
 }
 
-func setUsersNames(tx *sql.Tx, db *DBConnection, d *schema.ResourceData) error {
+func setUsersNames(tx *sql.Tx, _ *DBConnection, d *schema.ResourceData) error {
 	if !d.HasChange(groupUsersAttr) {
 		return nil
 	}
@@ -221,7 +221,7 @@ func setUsersNames(tx *sql.Tx, db *DBConnection, d *schema.ResourceData) error {
 	if removedUsers.Len() > 0 {
 		var removedUsersNamesSafe []string
 		for _, name := range removedUsers.List() {
-			userExists, err := checkIfUserExists(db.DB, name.(string))
+			userExists, err := checkIfUserExists(tx, name.(string))
 			if err != nil {
 				return err
 			}

@@ -114,7 +114,7 @@ func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) e
 	var shareId string
 	query = "SELECT share_id FROM SVV_DATASHARES WHERE share_type = 'OUTBOUND' AND share_name = $1"
 	log.Printf("[DEBUG] %s, $1=%s\n", query, strings.ToLower(shareName))
-	if err := db.DB.QueryRow(query, strings.ToLower(shareName)).Scan(&shareId); err != nil {
+	if err := tx.QueryRow(query, strings.ToLower(shareName)).Scan(&shareId); err != nil {
 		return err
 	}
 
@@ -261,7 +261,7 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	WHERE share_type = 'OUTBOUND'
 	AND share_id = $1`
 	log.Printf("[DEBUG] %s, $1=%s\n", query, d.Id())
-	err = db.QueryRow(query, d.Id()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created)
+	err = tx.QueryRow(query, d.Id()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created)
 	if err != nil {
 		return err
 	}
@@ -273,7 +273,7 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	d.Set(dataShareProducerNamespaceAttr, producerNamespace)
 	d.Set(dataShareCreatedAttr, created)
 
-	if err = readDatashareSchemas(db.DB, shareName, d); err != nil {
+	if err = readDatashareSchemas(tx, shareName, d); err != nil {
 		return err
 	}
 
@@ -284,7 +284,7 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	return nil
 }
 
-func readDatashareSchemas(db *sql.DB, shareName string, d *schema.ResourceData) error {
+func readDatashareSchemas(tx *sql.Tx, shareName string, d *schema.ResourceData) error {
 	query := `
 	SELECT
 		object_name
@@ -294,7 +294,7 @@ func readDatashareSchemas(db *sql.DB, shareName string, d *schema.ResourceData) 
 	AND share_name = $1
 `
 	log.Printf("[DEBUG] %s, $1=%s\n", query, shareName)
-	rows, err := db.Query(query, shareName)
+	rows, err := tx.Query(query, shareName)
 	if err != nil {
 		return err
 	}
@@ -329,6 +329,10 @@ func resourceRedshiftDatashareUpdate(db *DBConnection, d *schema.ResourceData) e
 
 	if err := setDatashareSchemas(tx, d); err != nil {
 		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return resourceRedshiftDatashareRead(db, d)
@@ -401,9 +405,15 @@ func setDatashareSchemas(tx *sql.Tx, d *schema.ResourceData) error {
 }
 
 func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) error {
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
 	var shareName string
 	query := "SELECT share_name FROM svv_datashares WHERE share_type='OUTBOUND' AND share_id=$1"
-	if err := db.QueryRow(query, d.Id()).Scan(&shareName); err != nil {
+	if err := tx.QueryRow(query, d.Id()).Scan(&shareName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			log.Printf("[WARN] data share with id %s does not exist.\n", d.Id())
 			return nil
@@ -412,5 +422,13 @@ func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) e
 	}
 	query = fmt.Sprintf("DROP DATASHARE %s", pq.QuoteIdentifier(shareName))
 	log.Printf("[DEBUG] %s\n", query)
+	_, err = tx.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
+	}
 	return nil
 }
