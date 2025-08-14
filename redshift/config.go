@@ -102,7 +102,7 @@ func (c *Client) Connect() (*DBConnection, error) {
 				return nil, fmt.Errorf("error connecting to Redshift server %q: %w", c.config.Host, err)
 			}
 		} else {
-			db, err = sql.Open("redshift-data", fmt.Sprintf("workgroup(%s)/%s?timeout=1m&region=eu-central-1", workgroupName, c.config.Database))
+			db, err = sql.Open("redshift-data", fmt.Sprintf("workgroup(%s)/%s?timeout=1m&region=eu-central-1&transactionMode=non-transactional&requestMode=blocking", workgroupName, c.config.Database))
 			if err != nil {
 				return nil, fmt.Errorf("error connecting to redshift workgroup %q: %w", workgroupName, err)
 			}
