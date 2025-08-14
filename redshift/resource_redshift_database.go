@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -24,6 +25,7 @@ const databaseDatashareSourceWithPermissions = "with_permissions"
 func redshiftDatabase() *schema.Resource {
 	return &schema.Resource{
 		Description:   `Defines a local database.`,
+		Exists:        RedshiftResourceExistsFunc(resourceRedshiftDatabaseExists),
 		CreateContext: ResourceFunc(resourceRedshiftDatabaseCreate),
 		ReadContext:   ResourceFunc(resourceRedshiftDatabaseRead),
 		UpdateContext: ResourceFunc(resourceRedshiftDatabaseUpdate),
@@ -99,6 +101,22 @@ func redshiftDatabase() *schema.Resource {
 			},
 		},
 	}
+}
+
+func resourceRedshiftDatabaseExists(db *DBConnection, d *schema.ResourceData) (bool, error) {
+	var name string
+	query := "SELECT datname FROM pg_database WHERE oid = $1"
+	log.Printf("[DEBUG] check if database exists: %s\n", query)
+	err := db.QueryRow(query, d.Id()).Scan(&name)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+
+	return true, nil
 }
 
 func resourceRedshiftDatabaseCreate(db *DBConnection, d *schema.ResourceData) error {
