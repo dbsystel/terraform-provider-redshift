@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	_ "github.com/lib/pq"
-	_ "github.com/mashiike/redshift-data-sql-driver"
+	_ "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
 var (
