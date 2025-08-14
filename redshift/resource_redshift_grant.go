@@ -1,6 +1,7 @@
 package redshift
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"regexp"
@@ -155,12 +156,22 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 
 	databaseName := getDatabaseName(db, d)
 
-	if err := revokeGrants(db, databaseName, d); err != nil {
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
+	if err := revokeGrants(tx, databaseName, d); err != nil {
 		return err
 	}
 
-	if err := createGrants(db, databaseName, d); err != nil {
+	if err := createGrants(tx, databaseName, d); err != nil {
 		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	d.SetId(generateGrantID(d))
@@ -169,10 +180,20 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGrantDelete(db *DBConnection, d *schema.ResourceData) error {
+	tx, err := startTransaction(db.client, "")
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
 	databaseName := getDatabaseName(db, d)
 
-	if err := revokeGrants(db, databaseName, d); err != nil {
+	if err := revokeGrants(tx, databaseName, d); err != nil {
 		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
 	return nil
@@ -636,20 +657,20 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
 	return nil
 }
 
-func revokeGrants(db *DBConnection, databaseName string, d *schema.ResourceData) error {
+func revokeGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
 	query := createGrantsRevokeQuery(d, databaseName)
-	_, err := db.Exec(query)
+	_, err := tx.Exec(query)
 	return err
 }
 
-func createGrants(db *DBConnection, databaseName string, d *schema.ResourceData) error {
+func createGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
 	if d.Get(grantPrivilegesAttr).(*schema.Set).Len() == 0 {
 		log.Printf("[DEBUG] no privileges to grant for %s", d.Get(grantGroupAttr).(string))
 		return nil
 	}
 
 	query := createGrantsQuery(d, databaseName)
-	_, err := db.Exec(query)
+	_, err := tx.Exec(query)
 	return err
 }
 
