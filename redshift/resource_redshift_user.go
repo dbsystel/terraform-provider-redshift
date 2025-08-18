@@ -299,6 +299,12 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	case err != nil:
 		return fmt.Errorf("error reading User: %w", err)
 	}
+
+	userValidUntil, err = validateAndAdjustValidUntil(userValidUntil)
+	if err != nil {
+		return err
+	}
+
 	userConnLimitNumber := -1
 	if userConnLimit != "UNLIMITED" {
 		if userConnLimitNumber, err = strconv.Atoi(userConnLimit); err != nil {
@@ -320,6 +326,25 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	d.Set(userSessionTimeoutAttr, userSessionTimeoutNumber)
 
 	return nil
+}
+
+const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
+
+var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$`)
+var correctDatetimeRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00$`)
+
+func validateAndAdjustValidUntil(validUntil string) (string, error) {
+	if validUntil == redshiftDataApiInfinityDateString {
+		// The Redshift Data API translates the `infinity` to a date in 2038 (see https://en.wikipedia.org/wiki/Year_2038_problem)
+		return "infinity", nil
+	} else if redshiftDataApiDatetimeRegexp.MatchString(validUntil) {
+		// The Redshift Data API returns the datetime without the timezone offset, so we need to add it
+		validUntil += "+00"
+	}
+	if !correctDatetimeRegexp.MatchString(validUntil) {
+		return "", fmt.Errorf(`received invalid date format for valid_until: %q, expected format is "YYYY-MM-DD HH:MM:SS+00"`, validUntil)
+	}
+	return validUntil, nil
 }
 
 func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error {
