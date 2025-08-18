@@ -12,9 +12,8 @@ It's published on the [Terraform registry](https://registry.terraform.io/provide
 ## Limitations
 
 Due to limited testing capacities, the following features are not tested/stable yet:
- 
+
 * External Schemas
-  * Data Catalog Database
   * Hive Database
   * RDS Postgres Database
   * RDS MySQL Database
