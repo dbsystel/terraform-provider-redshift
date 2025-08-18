@@ -7,7 +7,21 @@ It's published on the [Terraform registry](https://registry.terraform.io/provide
 ## Requirements
 
   - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
-  - [Go](https://golang.org/doc/install) 1.21 (to build the provider plugin)
+  - [Go](https://golang.org/doc/install) 1.24 (to build the provider plugin)
+
+## Limitations
+
+Due to limited testing capacities, the following features are not tested/stable yet:
+ 
+* External Schemas
+  * Data Catalog Database
+  * Hive Database
+  * RDS Postgres Database
+  * RDS MySQL Database
+  * Redshift Database
+* Temporary Credentials Cluster Identifier
+* Temporary Credentials Assume Role
+* Datashares
 
 ## Building The Provider
 
