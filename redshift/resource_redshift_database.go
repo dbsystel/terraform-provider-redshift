@@ -1,6 +1,7 @@
 package redshift
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
