@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -274,7 +275,7 @@ func TestAccRedshiftUser_SuperuserSyslogAccess(t *testing.T) {
 		"(superuser) RESTRICTED syslog access": {
 			isSuperuser:  true,
 			syslogAccess: defaultUserSyslogAccess,
-			expectError:  regexp.MustCompile("Superusers must have syslog access set to UNRESTRICTED."),
+			expectError:  regexp.MustCompile("superusers must have syslog access set to \"UNRESTRICTED\""),
 		},
 		"(superuser) UNRESTRICTED syslog access": {
 			isSuperuser:  true,
@@ -517,11 +518,76 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 			MaxConns: defaultProviderMaxOpenConnections,
 		}
 
-		client, err := config.Client()
+		client := config.NewClient(database)
 		if err != nil {
 			return fmt.Errorf("user is unable to login: %w", err)
 		}
 		defer client.Close()
 		return nil
+	}
+}
+
+func Test_validateAndAdjustValidUntil(t *testing.T) {
+	type args struct {
+		validUntil string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "translate Redshift Data API infinity date",
+			args: args{
+				validUntil: "2038-01-19 03:14:04",
+			},
+			want:    "infinity",
+			wantErr: false,
+		},
+		{
+			name: "adds suffix to Redshift Data API datetime",
+			args: args{
+				validUntil: "2025-08-06 17:22:56",
+			},
+			want:    "2025-08-06 17:22:56+00",
+			wantErr: false,
+		},
+		{
+			name: "does not add suffix to correct datetime",
+			args: args{
+				validUntil: "2025-08-06 17:22:56+00",
+			},
+			want:    "2025-08-06 17:22:56+00",
+			wantErr: false,
+		},
+		{
+			name: "returns error for invalid timezone",
+			args: args{
+				validUntil: "2025-08-06 17:22:56+01",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "returns error for invalid datetime",
+			args: args{
+				validUntil: "some none date",
+			},
+			want:    "",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateAndAdjustValidUntil(tt.args.validUntil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateAndAdjustValidUntil() error = %v, wantErr = %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("validateAndAdjustValidUntil() got = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
