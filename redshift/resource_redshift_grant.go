@@ -842,7 +842,7 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 }
 
 func getDatabaseName(db *DBConnection, d *schema.ResourceData) string {
-	databaseName := db.client.databaseName
+	databaseName := db.client.config.Database
 	if database, ok := d.GetOk(grantDatabaseAttr); ok {
 		databaseName = database.(string)
 	}

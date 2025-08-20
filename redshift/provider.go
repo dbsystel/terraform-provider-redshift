@@ -2,17 +2,11 @@ package redshift
 
 import (
 	"context"
-	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"regexp"
-	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	"github.com/aws/aws-sdk-go-v2/service/redshift"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
@@ -26,16 +20,18 @@ func Provider() *schema.Provider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
 			"host": {
-				Type:        schema.TypeString,
-				Description: "Name of Redshift server address to connect to.",
-				Required:    true,
-				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_HOST", ""),
+				Type:          schema.TypeString,
+				Description:   "Name of Redshift server address to connect to.",
+				Optional:      true,
+				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_HOST", ""),
+				ConflictsWith: []string{"data_api"},
 			},
 			"username": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_USER", "root"),
-				Description: "Redshift user name to connect as.",
+				Type:          schema.TypeString,
+				Optional:      true,
+				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_USER", "root"),
+				Description:   "Redshift user name to connect as.",
+				ConflictsWith: []string{"data_api"},
 			},
 			"password": {
 				Type:        schema.TypeString,
@@ -45,13 +41,15 @@ func Provider() *schema.Provider {
 				Sensitive:   true,
 				ConflictsWith: []string{
 					"temporary_credentials",
+					"data_api",
 				},
 			},
 			"port": {
-				Type:        schema.TypeInt,
-				Description: "The Redshift port number to connect to at the server host.",
-				Optional:    true,
-				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_PORT", 5439),
+				Type:          schema.TypeInt,
+				Description:   "The Redshift port number to connect to at the server host.",
+				Optional:      true,
+				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_PORT", 5439),
+				ConflictsWith: []string{"data_api"},
 			},
 			"sslmode": {
 				Type:        schema.TypeString,
@@ -64,6 +62,7 @@ func Provider() *schema.Provider {
 					"verify-ca",
 					"verify-full",
 				}, false),
+				ConflictsWith: []string{"data_api"},
 			},
 			"database": {
 				Type:        schema.TypeString,
@@ -72,11 +71,48 @@ func Provider() *schema.Provider {
 				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_DATABASE", "redshift"),
 			},
 			"max_connections": {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Default:      defaultProviderMaxOpenConnections,
-				Description:  "Maximum number of connections to establish to the database. Zero means unlimited.",
-				ValidateFunc: validation.IntAtLeast(-1),
+				Type:          schema.TypeInt,
+				Optional:      true,
+				Default:       defaultProviderMaxOpenConnections,
+				Description:   "Maximum number of connections to establish to the database. Zero means unlimited.",
+				ValidateFunc:  validation.IntAtLeast(-1),
+				ConflictsWith: []string{"data_api"},
+			},
+			"data_api": {
+				Type:        schema.TypeList,
+				Optional:    true,
+				Description: "Configuration for using the Redshift Data API. This can only be used for serverless Redshift clusters.",
+				MaxItems:    1,
+				ConflictsWith: []string{
+					"host",
+					"username",
+					"password",
+					"port",
+					"sslmode",
+					"max_connections",
+					"temporary_credentials",
+				},
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"workgroup_name": {
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "The name of the Redshift Serverless workgroup to connect to.",
+							DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", nil),
+							// https://docs.aws.amazon.com/redshift-serverless/latest/APIReference/API_Workgroup.html#:~:text=Required%3A%20No-,workgroupName,-The%20name%20of
+							ValidateFunc: validation.All(
+								validation.StringLenBetween(3, 64),
+								validation.StringMatch(regexp.MustCompile("[a-z0-9-]+"), "must be lowercase alphanumeric or hyphen characters"),
+							),
+						},
+						"region": {
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "The AWS region where the Redshift Serverless workgroup is located. If not specified, the region will be determined from the AWS SDK configuration.",
+							DefaultFunc: schema.MultiEnvDefaultFunc([]string{"AWS_REGION", "AWS_DEFAULT_REGION"}, nil),
+						},
+					},
+				},
 			},
 			"temporary_credentials": {
 				Type:        schema.TypeList,
@@ -85,6 +121,7 @@ func Provider() *schema.Provider {
 				MaxItems:    1,
 				ConflictsWith: []string{
 					"password",
+					"data_api",
 				},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -149,118 +186,25 @@ func Provider() *schema.Provider {
 }
 
 func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
-	username, password, err := resolveCredentials(d)
+	cfg, err := getConfigFromResourceData(d, temporaryCredentials)
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
-	cfg := Config{
-		Host:     d.Get("host").(string),
-		Port:     d.Get("port").(int),
-		Username: username,
-		Password: password,
-		Database: d.Get("database").(string),
-		SSLMode:  d.Get("sslmode").(string),
-		MaxConns: d.Get("max_connections").(int),
-	}
 
 	log.Println("[DEBUG] creating database client")
-	client := cfg.NewClient(d.Get("database").(string))
+	client := cfg.NewClient()
 	log.Println("[DEBUG] created database client")
 	return client, nil
 }
 
-func resolveCredentials(d *schema.ResourceData) (string, string, error) {
-	username, ok := d.GetOk("username")
-	if (!ok) || username == nil {
-		return "", "", fmt.Errorf("username is required")
+func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
+	database := d.Get("database").(string)
+	maxConnections := d.Get("max_connections").(int)
+	_, useDataApi := d.GetOk("data_api.0")
+	if useDataApi {
+		return getConfigFromDataApiResourceData(d, database)
 	}
-	if _, useTemporaryCredentials := d.GetOk("temporary_credentials"); useTemporaryCredentials {
-		log.Println("[DEBUG] using temporary credentials authentication")
-		dbUser, dbPassword, err := temporaryCredentials(username.(string), d)
-		log.Printf("[DEBUG] got temporary credentials with username %s\n", dbUser)
-		return dbUser, dbPassword, err
-	}
-
-	password, _ := d.GetOk("password")
-	log.Println("[DEBUG] using password authentication")
-	return username.(string), password.(string), nil
-}
-
-// temporaryCredentials gets temporary credentials using GetClusterCredentials
-func temporaryCredentials(username string, d *schema.ResourceData) (string, string, error) {
-	sdkClient, err := redshiftSdkClient(d)
-	if err != nil {
-		return "", "", err
-	}
-	clusterIdentifier, clusterIdentifierIsSet := d.GetOk("temporary_credentials.0.cluster_identifier")
-	if !clusterIdentifierIsSet {
-		return "", "", fmt.Errorf("temporary_credentials not configured")
-	}
-	input := &redshift.GetClusterCredentialsInput{
-		ClusterIdentifier: aws.String(clusterIdentifier.(string)),
-		DbName:            aws.String(d.Get("database").(string)),
-		DbUser:            aws.String(username),
-	}
-	if autoCreateUser, ok := d.GetOk("temporary_credentials.0.auto_create_user"); ok {
-		input.AutoCreate = aws.Bool(autoCreateUser.(bool))
-	}
-	if dbGroups, ok := d.GetOk("temporary_credentials.0.db_groups"); ok {
-		if dbGroups != nil {
-			dbGroupsList := dbGroups.(*schema.Set).List()
-			if len(dbGroupsList) > 0 {
-				var groups []string
-				for _, group := range dbGroupsList {
-					if group.(string) != "" {
-						groups = append(groups, group.(string))
-					}
-				}
-				input.DbGroups = groups
-			}
-		}
-	}
-	if durationSeconds, ok := d.GetOk("temporary_credentials.0.duration_seconds"); ok {
-		duration := durationSeconds.(int)
-		if duration > 0 {
-			input.DurationSeconds = aws.Int32(int32(duration))
-		}
-	}
-	log.Println("[DEBUG] making GetClusterCredentials request")
-	response, err := sdkClient.GetClusterCredentials(context.TODO(), input)
-	if err != nil {
-		return "", "", err
-	}
-	return aws.ToString(response.DbUser), aws.ToString(response.DbPassword), nil
-}
-
-func redshiftSdkClient(d *schema.ResourceData) (*redshift.Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-
-	if region := d.Get("temporary_credentials.0.region").(string); region != "" {
-		cfg.Region = region
-	}
-
-	if _, ok := d.GetOk("temporary_credentials.0.assume_role"); ok {
-		var parsedRoleArn string
-		if roleArn, ok := d.GetOk("temporary_credentials.0.assume_role.0.arn"); ok {
-			parsedRoleArn = roleArn.(string)
-		}
-		log.Printf("[DEBUG] Assuming role provided in configuration: [%s]", parsedRoleArn)
-		opts := func(options *stscreds.AssumeRoleOptions) {
-			options.Duration = time.Duration(defaultTemporaryCredentialsAssumeRoleDurationInSeconds) * time.Second
-			if externalID, ok := d.GetOk("temporary_credentials.0.assume_role.0.external_id"); ok {
-				options.ExternalID = aws.String(externalID.(string))
-			}
-			if sessionName, ok := d.GetOk("temporary_credentials.0.assume_role.0.session_name"); ok {
-				options.RoleSessionName = sessionName.(string)
-			}
-		}
-		stsClient := sts.NewFromConfig(cfg)
-		cfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, parsedRoleArn, opts)
-	}
-	return redshift.NewFromConfig(cfg), nil
+	return getConfigFromPqResourceData(d, database, maxConnections, temporaryCredentialsResolver)
 }
 
 func assumeRoleSchema() *schema.Schema {

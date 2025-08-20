@@ -3,12 +3,8 @@ package redshift
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
-	"os"
-	"strings"
 	"sync"
 
-	_ "github.com/lib/pq"
 	_ "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
@@ -17,15 +13,11 @@ var (
 	dbRegistry     = make(map[string]*DBConnection, 1)
 )
 
-// Config - provider config
 type Config struct {
-	Host     string
-	Username string
-	Password string
-	Port     int
-	Database string
-	SSLMode  string
-	MaxConns int
+	DriverName string
+	ConnStr    string
+	Database   string
+	MaxConns   int
 
 	serverlessCheckMutex *sync.Mutex
 	isServerless         bool
@@ -35,10 +27,21 @@ type Config struct {
 	retrievedUsername      string
 }
 
+func NewConfig(driverName, connStr, database string, maxConns int) *Config {
+	return &Config{
+		DriverName: driverName,
+		ConnStr:    connStr,
+		Database:   database,
+		MaxConns:   maxConns,
+
+		serverlessCheckMutex:   &sync.Mutex{},
+		usernameRetrievalMutex: &sync.Mutex{},
+	}
+}
+
 // Client struct holding connection string
 type Client struct {
-	config       Config
-	databaseName string
+	config Config
 
 	db *sql.DB
 }
@@ -50,10 +53,9 @@ type DBConnection struct {
 }
 
 // NewClient returns client config for the specified database.
-func (c *Config) NewClient(database string) *Client {
+func (c *Config) NewClient() *Client {
 	return &Client{
-		config:       *c,
-		databaseName: database,
+		config: *c,
 	}
 }
 
@@ -86,9 +88,6 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 }
 
 func (c *Config) GetUsername(db *DBConnection) (string, error) {
-	if c.usernameRetrievalMutex == nil {
-		c.usernameRetrievalMutex = &sync.Mutex{}
-	}
 	if c.retrievedUsername != "" {
 		return c.retrievedUsername, nil
 	}
@@ -116,28 +115,19 @@ func (c *Client) Connect() (*DBConnection, error) {
 	dbRegistryLock.Lock()
 	defer dbRegistryLock.Unlock()
 
-	dsn := c.config.connStr(c.databaseName)
+	dsn := c.config.ConnStr
+	driverName := c.config.DriverName
 	conn, found := dbRegistry[dsn]
-	if !found {
-		// todo: put values into config struct
-		workgroupName, ok := os.LookupEnv("SERVERLESS_WORKGROUP_NAME")
-		var db *sql.DB
-		var err error
-		if !ok {
-			db, err = sql.Open(proxyDriverName, dsn)
-			if err != nil {
-				return nil, fmt.Errorf("error connecting to Redshift server %q: %w", c.config.Host, err)
-			}
-		} else {
-			db, err = sql.Open("redshift-data", fmt.Sprintf("workgroup(%s)/%s?timeout=1m&region=eu-central-1&transactionMode=non-transactional&requestMode=blocking", workgroupName, c.config.Database))
-			if err != nil {
-				return nil, fmt.Errorf("error connecting to redshift workgroup %q: %w", workgroupName, err)
-			}
+
+	if !found || conn.Ping() != nil {
+		db, err := sql.Open(driverName, dsn)
+		if err != nil {
+			return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q, dsn: %q): %w", driverName, dsn, err)
 		}
 
 		// We don't want to retain connection
 		// So when we connect on a specific database which might be managed by terraform,
-		// we don't keep opened connection in case of the db has to be dopped in the plan.
+		// we don't keep opened connection in case of the db has to be dropped in the plan.
 		db.SetMaxIdleConns(0)
 		db.SetMaxOpenConns(c.config.MaxConns)
 
@@ -145,38 +135,16 @@ func (c *Client) Connect() (*DBConnection, error) {
 			db,
 			c,
 		}
+
+		_, err = c.config.GetUsername(conn)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q, dsn: %q): %w", driverName, dsn, err)
+		}
+
 		dbRegistry[dsn] = conn
 	}
 
 	return conn, nil
-}
-
-func (c *Config) connStr(database string) string {
-	connStr := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?%s",
-		url.QueryEscape(c.Username),
-		url.QueryEscape(c.Password),
-		c.Host,
-		c.Port,
-		database,
-		strings.Join(c.connParams(), "&"),
-	)
-
-	return connStr
-}
-
-func (c *Config) connParams() []string {
-	params := map[string]string{}
-
-	params["sslmode"] = c.SSLMode
-	params["connect_timeout"] = "180"
-
-	var paramsArray []string
-	for key, value := range params {
-		paramsArray = append(paramsArray, fmt.Sprintf("%s=%s", key, url.QueryEscape(value)))
-	}
-
-	return paramsArray
 }
 
 func (c *Client) Close() {
