@@ -123,6 +123,22 @@ func TestAccRedshiftTemporaryCredentialsAssumeRole(t *testing.T) {
 	defer db.Close()
 }
 
+func TestAccRedshiftDataApiServerlessConnect(t *testing.T) {
+	_ = getEnvOrSkip("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", t)
+	defer unsetAndSetEnvVars("REDSHIFT_HOST")()
+	provider := Provider()
+	provider.Configure(context.Background(), terraform.NewResourceConfigRaw(map[string]interface{}{}))
+	client, ok := provider.Meta().(*Client)
+	if !ok {
+		t.Fatal("Unable to initialize client")
+	}
+	db, err := client.Connect()
+	if err != nil {
+		t.Fatalf("Unable to connect to database: %s", err)
+	}
+	defer db.Close()
+}
+
 func prepareRedshiftTemporaryCredentialsTestCases(t *testing.T, provider *schema.Provider) {
 	redshiftPassword := os.Getenv("REDSHIFT_PASSWORD")
 	defer os.Setenv("REDSHIFT_PASSWORD", redshiftPassword)
