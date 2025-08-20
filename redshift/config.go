@@ -30,6 +30,9 @@ type Config struct {
 	serverlessCheckMutex *sync.Mutex
 	isServerless         bool
 	checkedForServerless bool
+
+	usernameRetrievalMutex *sync.Mutex
+	retrievedUsername      string
 }
 
 // Client struct holding connection string
@@ -80,6 +83,30 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 	}
 
 	return false, err
+}
+
+func (c *Config) GetUsername(db *DBConnection) (string, error) {
+	if c.usernameRetrievalMutex == nil {
+		c.usernameRetrievalMutex = &sync.Mutex{}
+	}
+	if c.retrievedUsername != "" {
+		return c.retrievedUsername, nil
+	}
+	c.usernameRetrievalMutex.Lock()
+	defer c.usernameRetrievalMutex.Unlock()
+	if c.retrievedUsername != "" {
+		return c.retrievedUsername, nil
+	}
+	row := db.QueryRow("SELECT current_user;")
+	if row.Err() != nil {
+		return "", fmt.Errorf("error retrieving current user: %w", row.Err())
+	}
+	var username string
+	if err := row.Scan(&username); err != nil {
+		return "", fmt.Errorf("error scanning current user: %w", err)
+	}
+	c.retrievedUsername = username
+	return c.retrievedUsername, nil
 }
 
 // Connect returns a copy to an sql.Open()'ed database connection wrapped in a DBConnection struct.

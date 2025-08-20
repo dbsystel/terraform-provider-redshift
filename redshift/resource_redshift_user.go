@@ -350,7 +350,11 @@ func validateAndAdjustValidUntil(validUntil string) (string, error) {
 func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error {
 	useSysID := d.Id()
 	userName := d.Get(userNameAttr).(string)
-	newOwnerName := permanentUsername(db.client.config.Username)
+	rawUsername, err := db.client.config.GetUsername(db)
+	if err != nil {
+		return fmt.Errorf("error retrieving username: %w", err)
+	}
+	newOwnerName := permanentUsername(rawUsername)
 
 	tx, err := startTransaction(db.client)
 	if err != nil {
