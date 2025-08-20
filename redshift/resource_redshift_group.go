@@ -97,7 +97,7 @@ func resourceRedshiftGroupReadImpl(db *DBConnection, d *schema.ResourceData) err
 func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error
 func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGroupUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

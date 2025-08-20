@@ -97,7 +97,7 @@ such as RA3.
 }
 
 func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	var shareName, owner, producerAccount, producerNamespace, created string
 	var publicAccessible bool
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func readDatashareSchemas(tx *sql.Tx, shareName string, d *schema.ResourceData) 
 }
 
 func resourceRedshiftDatashareUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func setDatashareSchemas(tx *sql.Tx, d *schema.ResourceData) error {
 }
 
 func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

@@ -567,7 +567,7 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 }
 
 func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -588,7 +588,7 @@ func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) erro
 }
 
 func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -780,7 +780,7 @@ func getRedshiftConfigQueryPart(d *schema.ResourceData, sourceDbName string) str
 }
 
 func resourceRedshiftSchemaUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

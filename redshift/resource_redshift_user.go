@@ -140,7 +140,7 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 }
 
 func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 	userName := d.Get(userNameAttr).(string)
 	newOwnerName := permanentUsername(db.client.config.Username)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -454,7 +454,7 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 }
 
 func resourceRedshiftUserUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
