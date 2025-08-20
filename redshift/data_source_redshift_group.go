@@ -1,12 +1,12 @@
 package redshift
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"github.com/lib/pq"
 )
 
 func dataSourceRedshiftGroup() *schema.Resource {
@@ -43,9 +43,30 @@ func dataSourceRedshiftGroupRead(db *DBConnection, d *schema.ResourceData) error
 		groupUsers []string
 	)
 
-	sql := `SELECT ARRAY(SELECT u.usename FROM pg_user_info u, pg_group g WHERE g.groname = $1 AND u.usesysid = ANY(g.grolist)) AS members, grosysid FROM pg_group WHERE groname = $1`
-	if err := db.QueryRow(sql, d.Get(groupNameAttr).(string)).Scan(pq.Array(&groupUsers), &groupId); err != nil {
+	groupName := d.Get(groupNameAttr).(string)
+
+	query := `SELECT u.usename, g.grosysid FROM pg_user_info u, pg_group g WHERE g.groname = $1 AND u.usesysid = ANY(g.grolist);`
+	rows, err := db.Query(query, groupName)
+	if err != nil {
 		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("could not read group members for group name %q: %w", groupName, err)
+		}
+		var userName string
+		if err := rows.Scan(&userName, &groupId); err != nil {
+			return fmt.Errorf("could not read group members for group name %q: %w", groupName, err)
+		}
+		groupUsers = append(groupUsers, userName)
+	}
+	if len(groupUsers) == 0 {
+		// no users found so the group id could not be fetched, we have to query for the name
+		query = `SELECT grosysid FROM pg_group WHERE groname = $1;`
+		if err := db.QueryRow(query, groupName).Scan(&groupId); err != nil {
+			return err
+		}
 	}
 
 	d.SetId(groupId)
