@@ -19,6 +19,98 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
+const testAccRedshiftUserLoginConfig = `
+resource "redshift_user" "with_email" {
+  name = "John-and-Jane.doe@example.com"
+  password = "Foobarbaz1"
+}
+
+resource "redshift_user" "with_hashed_password" {
+  name = "hashed_password"
+  password = "Foobarbaz3"
+}
+`
+
+const testAccRedshiftUserLoginUpdateConfig = `
+resource "redshift_user" "with_email" {
+  name = "John-and-Jane.doe@example.com"
+  password = "Foobarbaz1"
+}
+
+resource "redshift_user" "with_hashed_password" {
+  name = "hashed_password"
+  password = "md5ad3b897bab2474bc7e408326cb18c42f"
+}
+`
+
+func TestAccRedshiftUser_Login(t *testing.T) {
+	if os.Getenv("REDSHIFT_TEST_ACC_SKIP_USER_LOGIN") != "" {
+		t.Skipf("Skipping user login test as REDSHIFT_TEST_ACC_SKIP_USER_LOGIN is set")
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftUserLoginConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("John-and-Jane.doe@example.com"),
+					resource.TestCheckResourceAttr("redshift_user.with_email", "name", "John-and-Jane.doe@example.com"),
+					testAccCheckRedshiftUserCanLogin("John-and-Jane.doe@example.com", "Foobarbaz1"),
+
+					testAccCheckRedshiftUserExists("hashed_password"),
+					testAccCheckRedshiftUserCanLogin("hashed_password", "Foobarbaz3"),
+				),
+			},
+			{
+				Config: testAccRedshiftUserLoginUpdateConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("hashed_password"),
+					testAccCheckRedshiftUserCanLogin("hashed_password", "Foobarbaz6"),
+				),
+			},
+		},
+	})
+}
+
+const testAccRedshiftUserConfig = `
+resource "redshift_user" "simple" {
+  name = "user_simple"
+}
+
+resource "redshift_user" "user_with_defaults" {
+  name = "user_defaults"
+  valid_until = "infinity"
+  superuser = false
+  create_database = false
+  connection_limit = -1
+  password = ""
+}
+
+resource "redshift_user" "user_with_create_database" {
+  name = "user_create_database"
+  create_database = true
+}
+
+resource "redshift_user" "user_with_unrestricted_syslog" {
+  name = "user_syslog"
+  syslog_access = "UNRESTRICTED"
+}
+
+resource "redshift_user" "user_superuser" {
+  name = "user_superuser"
+  superuser = true
+  password = "FooBarBaz123"
+}
+
+resource "redshift_user" "user_timeout" {
+  name = "user_timeout"
+  password = "FooBarBaz123"
+  session_timeout = 60
+}
+`
+
 func TestAccRedshiftUser_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -30,13 +122,6 @@ func TestAccRedshiftUser_Basic(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRedshiftUserExists("user_simple"),
 					resource.TestCheckResourceAttr("redshift_user.simple", "name", "user_simple"),
-
-					testAccCheckRedshiftUserExists("John-and-Jane.doe@example.com"),
-					resource.TestCheckResourceAttr("redshift_user.with_email", "name", "John-and-Jane.doe@example.com"),
-					testAccCheckRedshiftUserCanLogin("John-and-Jane.doe@example.com", "Foobarbaz1"),
-
-					testAccCheckRedshiftUserExists("hashed_password"),
-					testAccCheckRedshiftUserCanLogin("hashed_password", "Foobarbaz2"),
 
 					testAccCheckRedshiftUserExists("user_defaults"),
 					resource.TestCheckResourceAttr("redshift_user.user_with_defaults", "name", "user_defaults"),
@@ -74,7 +159,6 @@ func TestAccRedshiftUser_Update(t *testing.T) {
 	var configCreate = `
 resource "redshift_user" "update_user" {
   name = "update_user"
-  password = "Foobarbaz1"
   valid_until = "2038-01-04 12:00:00+00"
 }
 `
@@ -83,16 +167,6 @@ resource "redshift_user" "update_user" {
 resource "redshift_user" "update_user" {
   name = "update_user2"
   connection_limit = 5
-  password = "Foobarbaz5"
-  syslog_access = "UNRESTRICTED"
-  create_database = true
-}
-`
-	var configUpdate2 = `
-resource "redshift_user" "update_user" {
-  name = "update_user2"
-  connection_limit = 5
-  password = "md508d5d11f1f947091b312fb36b25e621f"
   syslog_access = "UNRESTRICTED"
   create_database = true
 }
@@ -126,14 +200,6 @@ resource "redshift_user" "update_user" {
 					resource.TestCheckResourceAttr("redshift_user.update_user", "valid_until", "infinity"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "syslog_access", "UNRESTRICTED"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "create_database", "true"),
-				),
-			},
-			{
-				Config: configUpdate2,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckRedshiftUserExists("update_user2"),
-					testAccCheckRedshiftUserCanLogin("update_user2", "Foobarbaz6"),
-					resource.TestCheckResourceAttr("redshift_user.update_user", "password", "md508d5d11f1f947091b312fb36b25e621f"),
 				),
 			},
 			// apply the first one again to check if all parameters roll back properly
@@ -427,53 +493,6 @@ func checkUserExists(client *Client, user string) (bool, error) {
 	return true, nil
 }
 
-const testAccRedshiftUserConfig = `
-resource "redshift_user" "simple" {
-  name = "user_simple"
-}
-
-resource "redshift_user" "with_email" {
-  name = "John-and-Jane.doe@example.com"
-  password = "Foobarbaz1"
-}
-
-resource "redshift_user" "with_hashed_password" {
-  name = "hashed_password"
-  password = "md5ad3b897bab2474bc7e408326cb18c42f"
-}
-
-resource "redshift_user" "user_with_defaults" {
-  name = "user_defaults"
-  valid_until = "infinity"
-  superuser = false
-  create_database = false
-  connection_limit = -1
-  password = ""
-}
-
-resource "redshift_user" "user_with_create_database" {
-  name = "user_create_database"
-  create_database = true
-}
-
-resource "redshift_user" "user_with_unrestricted_syslog" {
-  name = "user_syslog"
-  syslog_access = "UNRESTRICTED"
-}
-
-resource "redshift_user" "user_superuser" {
-  name = "user_superuser"
-  superuser = true
-  password = "FooBarBaz123"
-}
-
-resource "redshift_user" "user_timeout" {
-  name = "user_timeout"
-  password = "FooBarBaz123"
-  session_timeout = 60
-}
-`
-
 func TestPermanentUsername(t *testing.T) {
 	expected := "user"
 	if result := permanentUsername(expected); result != expected {
@@ -508,17 +527,10 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 		if !ok {
 			sslMode = "require"
 		}
-		config := &Config{
-			Host:     os.Getenv("REDSHIFT_HOST"),
-			Port:     portNum,
-			Username: user,
-			Password: password,
-			Database: database,
-			SSLMode:  sslMode,
-			MaxConns: defaultProviderMaxOpenConnections,
-		}
+		config := NewPqConfig(os.Getenv("REDSHIFT_HOST"), database, user, password, portNum, sslMode,
+			defaultProviderMaxOpenConnections)
 
-		client := config.NewClient(database)
+		client := config.NewClient()
 		if err != nil {
 			return fmt.Errorf("user is unable to login: %w", err)
 		}
