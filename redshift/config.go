@@ -71,9 +71,10 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 
 	c.checkedForServerless = true
 
-	_, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
+	rows, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
 	// No error means we have accessed the view and are running Redshift Serverless
 	if err == nil {
+		defer rows.Close()
 		c.isServerless = true
 		return true, nil
 	}
