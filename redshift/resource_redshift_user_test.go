@@ -57,9 +57,11 @@ func TestAccRedshiftUser_Login(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRedshiftUserExists("John-and-Jane.doe@example.com"),
 					resource.TestCheckResourceAttr("redshift_user.with_email", "name", "John-and-Jane.doe@example.com"),
+					resource.TestCheckResourceAttr("redshift_user.with_email", "password", "Foobarbaz1"),
 					testAccCheckRedshiftUserCanLogin("John-and-Jane.doe@example.com", "Foobarbaz1"),
 
 					testAccCheckRedshiftUserExists("hashed_password"),
+					resource.TestCheckResourceAttr("redshift_user.with_hashed_password", "password", "Foobarbaz3"),
 					testAccCheckRedshiftUserCanLogin("hashed_password", "Foobarbaz3"),
 				),
 			},
@@ -67,6 +69,7 @@ func TestAccRedshiftUser_Login(t *testing.T) {
 				Config: testAccRedshiftUserLoginUpdateConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRedshiftUserExists("hashed_password"),
+					resource.TestCheckResourceAttr("redshift_user.with_hashed_password", "password", "md5ad3b897bab2474bc7e408326cb18c42f"),
 					testAccCheckRedshiftUserCanLogin("hashed_password", "Foobarbaz6"),
 				),
 			},
@@ -182,7 +185,6 @@ resource "redshift_user" "update_user" {
 					testAccCheckRedshiftUserExists("update_user"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "name", "update_user"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "connection_limit", "-1"),
-					resource.TestCheckResourceAttr("redshift_user.update_user", "password", "Foobarbaz1"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "valid_until", "2038-01-04 12:00:00+00"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "syslog_access", "RESTRICTED"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "create_database", "false"),
@@ -196,7 +198,6 @@ resource "redshift_user" "update_user" {
 						"redshift_user.update_user", "name", "update_user2",
 					),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "connection_limit", "5"),
-					resource.TestCheckResourceAttr("redshift_user.update_user", "password", "Foobarbaz5"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "valid_until", "infinity"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "syslog_access", "UNRESTRICTED"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "create_database", "true"),
@@ -209,7 +210,6 @@ resource "redshift_user" "update_user" {
 					testAccCheckRedshiftUserExists("update_user"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "name", "update_user"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "connection_limit", "-1"),
-					resource.TestCheckResourceAttr("redshift_user.update_user", "password", "Foobarbaz1"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "valid_until", "2038-01-04 12:00:00+00"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "syslog_access", "RESTRICTED"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "create_database", "false"),
