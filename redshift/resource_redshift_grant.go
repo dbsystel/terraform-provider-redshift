@@ -544,6 +544,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	contains := func(callables []string, objName string) bool {
 		for _, callable := range callables {
@@ -553,7 +554,6 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		}
 		return false
 	}
-	defer rows.Close()
 
 	privilegesSet := schema.NewSet(schema.HashString, nil)
 	for rows.Next() {
@@ -626,9 +626,9 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	objects := d.Get(grantObjectsAttr).(*schema.Set)
-	defer rows.Close()
 
 	for rows.Next() {
 		var objName string
