@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	redshiftdatasqldriver "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
 var (
@@ -42,6 +44,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if v := os.Getenv("REDSHIFT_USER"); v == "" {
 		t.Fatal("REDSHIFT_USER must be set for acceptance tests")
+	}
+	if v := os.Getenv("REDSHIFT_TEST_ACC_DEBUG_REDSHIFT_DATA"); v != "" {
+		redshiftdatasqldriver.SetDebugLogger(log.New(os.Stdout, "[redshift-data][debug]", log.Ldate|log.Ltime|log.Lshortfile))
 	}
 }
 
