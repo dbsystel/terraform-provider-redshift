@@ -2,7 +2,7 @@
 
 This provider allows to manage with Terraform [AWS Redshift](https://aws.amazon.com/redshift/) objects like users, groups, schemas, etc...
 
-It's published on the [Terraform registry](https://registry.terraform.io/providers/dbsystel/redshift/latest/docs).
+It's published on the [OpenTofu Registry](https://search.opentofu.org/provider/dbsystel/redshift/latest).
 
 ## Requirements
 
@@ -59,10 +59,25 @@ Terraform](https://www.terraform.io/docs/extend/index.html) docs.
 Acceptance tests require a running real AWS Redshift cluster.
 
 ```sh
+TF_ACC=1
+TF_ACC_PROVIDER_HOST=registry.opentofu.org
+TF_ACC_PROVIDER_NAMESPACE=hashicorp
+TF_ACC_TERRAFORM_PATH=<path to tofu binary>
+REDSHIFT_DATABASE=redshift
+REDSHIFT_ROOT_USERNAME=someotherroot
+
+# user + password setup
 REDSHIFT_HOST=<cluster ip or DNS>
 REDSHIFT_USER=root
-REDSHIFT_DATABASE=redshift
 REDSHIFT_PASSWORD=<password>
+
+# Redshift Data API setup
+AWS_REGION=eu-central-1
+REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME=some-workgroup
+REDSHIFT_TEST_ACC_DEBUG_REDSHIFT_DATA=true
+# optional, if the instance is not reachable through TCP/IP using the REDSHIFT_HOST env var
+REDSHIFT_TEST_ACC_SKIP_USER_LOGIN=true
+
 make testacc
 ```
 
