@@ -54,6 +54,7 @@ provider "redshift" {
 
 ### Optional
 
+- `data_api` (Block List, Max: 1) Configuration for using the Redshift Data API. This can only be used for serverless Redshift clusters. (see [below for nested schema](#nestedblock--data_api))
 - `database` (String) The name of the database to connect to. The default is `redshift`.
 - `host` (String) Name of Redshift server address to connect to.
 - `max_connections` (Number) Maximum number of connections to establish to the database. Zero means unlimited.
@@ -62,6 +63,15 @@ provider "redshift" {
 - `sslmode` (String) This option determines whether or with what priority a secure SSL TCP/IP connection will be negotiated with the Redshift server. Valid values are `require` (default, always SSL, also skip verification), `verify-ca` (always SSL, verify that the certificate presented by the server was signed by a trusted CA), `verify-full` (always SSL, verify that the certification presented by the server was signed by a trusted CA and the server host name matches the one in the certificate), `disable` (no SSL).
 - `temporary_credentials` (Block List, Max: 1) Configuration for obtaining a temporary password using redshift:GetClusterCredentials (see [below for nested schema](#nestedblock--temporary_credentials))
 - `username` (String) Redshift user name to connect as.
+
+<a id="nestedblock--data_api"></a>
+### Nested Schema for `data_api`
+
+Required:
+
+- `region` (String) The AWS region where the Redshift Serverless workgroup is located. If not specified, the region will be determined from the AWS SDK configuration.
+- `workgroup_name` (String) The name of the Redshift Serverless workgroup to connect to.
+
 
 <a id="nestedblock--temporary_credentials"></a>
 ### Nested Schema for `temporary_credentials`
