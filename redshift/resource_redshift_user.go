@@ -330,8 +330,8 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 
 const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
 
-var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$`)
-var correctDatetimeRegexp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00$`)
+var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
+var correctDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?\+00$`)
 
 func validateAndAdjustValidUntil(validUntil string) (string, error) {
 	if validUntil == redshiftDataApiInfinityDateString {

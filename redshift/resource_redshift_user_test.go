@@ -574,6 +574,14 @@ func Test_validateAndAdjustValidUntil(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "does not add suffix to correct datetime with sub-second check",
+			args: args{
+				validUntil: "2025-08-06 17:22:56.0+00",
+			},
+			want:    "2025-08-06 17:22:56.0+00",
+			wantErr: false,
+		},
+		{
 			name: "returns error for invalid timezone",
 			args: args{
 				validUntil: "2025-08-06 17:22:56+01",
