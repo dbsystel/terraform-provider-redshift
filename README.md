@@ -1,13 +1,40 @@
 # Terraform Provider for AWS Redshift
 
-This provider allows to manage with Terraform [AWS Redshift](https://aws.amazon.com/redshift/) objects like users, groups, schemas, etc..
+This provider allows to manage with Terraform [AWS Redshift](https://aws.amazon.com/redshift/) objects like users, groups, schemas, etc...
 
 It's published on the [Terraform registry](https://registry.terraform.io/providers/dbsystel/redshift/latest/docs).
 
 ## Requirements
 
-  - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
-  - [Go](https://golang.org/doc/install) 1.21 (to build the provider plugin)
+- [Terraform](https://www.terraform.io/downloads.html) >= 1.0
+- [Go](https://golang.org/doc/install) 1.24 (to build the provider plugin)
+
+## Limitations
+
+### Untested features
+
+Due to limited testing capacities, the following features are not tested/stable yet:
+
+* External Schemas
+    * Hive Database
+    * RDS Postgres Database
+    * RDS MySQL Database
+    * Redshift Database
+* Temporary Credentials Cluster Identifier
+* Temporary Credentials Assume Role
+* Datashares
+
+### Using the AWS Redshift Data API
+
+This provider *does* support connecting to the Redshift instance using the AWS Redshift Data API. However, this is not
+the default behavior, requires some additional configuration and comes along with some caveats:
+
+* Transactions are not run as real DB-level transactions, but rather as a sequence of individual statements (`BatchExecuteStatement` executes all statements at once and does not support queries while being in transaction mode).
+* Due to the unsupported state of transactions, interfering DB interactions might lead to unexpected results.
+* In order to
+  prevent [errors due to conflicts with concurrent transactions](https://stackoverflow.com/questions/37344942/redshift-could-not-complete-because-of-conflict-with-concurrent-transaction),
+  all statements depend on one lock across resources. This may lead to longer execution times, especially when multiple
+  resources are created or updated at the same time.
 
 ## Building The Provider
 
@@ -21,6 +48,7 @@ Enter the provider directory and build the provider
 $ cd terraform-provider-redshift
 $ make build
 ```
+
 ## Development
 
 If you're new to provider development, a good place to start is the [Extending
@@ -28,7 +56,7 @@ Terraform](https://www.terraform.io/docs/extend/index.html) docs.
 
 ### Running Tests
 
-Acceptance tests require a running real AWS Redshift cluster. 
+Acceptance tests require a running real AWS Redshift cluster.
 
 ```sh
 REDSHIFT_HOST=<cluster ip or DNS>
@@ -39,6 +67,7 @@ make testacc
 ```
 
 If your cluster is only accessible from within the VPC, you can connect via a socks proxy:
+
 ```sh
 ALL_PROXY=socks5[h]://[<socks-user>:<socks-password>@]<socks-host>[:<socks-port>]
 NO_PROXY=127.0.0.1,192.168.0.0/24,*.example.com,localhost
@@ -58,8 +87,9 @@ Use `go generate` to update generated docs.
 
 ## Releasing
 
-Builds and releases are automated with GitHub Actions and [GoReleaser](https://github.com/goreleaser/goreleaser/). 
-The changelog is managed with [github-changelog-generator](https://github.com/github-changelog-generator/github-changelog-generator).
+Builds and releases are automated with GitHub Actions and [GoReleaser](https://github.com/goreleaser/goreleaser/).
+The changelog is managed
+with [github-changelog-generator](https://github.com/github-changelog-generator/github-changelog-generator).
 
 Currently there are a few manual steps to this:
 

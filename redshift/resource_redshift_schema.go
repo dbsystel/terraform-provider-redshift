@@ -418,7 +418,7 @@ func resourceRedshiftSchemaReadImpl(db *DBConnection, d *schema.ResourceData) er
 	LEFT JOIN pg_user_info
 		ON (svv_all_schemas.database_name = $1 AND pg_user_info.usesysid = svv_all_schemas.schema_owner)
 	WHERE svv_all_schemas.database_name = $1
-	AND pg_namespace.oid = $2`, db.client.databaseName, d.Id()).Scan(&schemaName, &schemaOwner, &schemaType)
+	AND pg_namespace.oid = $2`, db.client.config.Database, d.Id()).Scan(&schemaName, &schemaOwner, &schemaType)
 	if err != nil {
 		return err
 	}
@@ -447,7 +447,7 @@ func resourceRedshiftSchemaReadLocal(db *DBConnection, d *schema.ResourceData) e
 			FROM svv_redshift_schema_quota
 			WHERE database_name = $1 
 			  AND schema_name = $2
-		`, db.client.databaseName, d.Get(schemaNameAttr)).Scan(&schemaQuota)
+		`, db.client.config.Database, d.Get(schemaNameAttr)).Scan(&schemaQuota)
 	} else {
 		err = db.QueryRow(`
 			SELECT
@@ -567,7 +567,7 @@ func resourceRedshiftSchemaReadExternal(db *DBConnection, d *schema.ResourceData
 }
 
 func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -588,7 +588,7 @@ func resourceRedshiftSchemaDelete(db *DBConnection, d *schema.ResourceData) erro
 }
 
 func resourceRedshiftSchemaCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -780,7 +780,7 @@ func getRedshiftConfigQueryPart(d *schema.ResourceData, sourceDbName string) str
 }
 
 func resourceRedshiftSchemaUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

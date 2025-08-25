@@ -3,11 +3,7 @@ package redshift
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
-	"strings"
 	"sync"
-
-	_ "github.com/lib/pq"
 )
 
 var (
@@ -15,25 +11,35 @@ var (
 	dbRegistry     = make(map[string]*DBConnection, 1)
 )
 
-// Config - provider config
 type Config struct {
-	Host     string
-	Username string
-	Password string
-	Port     int
-	Database string
-	SSLMode  string
-	MaxConns int
+	DriverName string
+	ConnStr    string
+	Database   string
+	MaxConns   int
 
 	serverlessCheckMutex *sync.Mutex
 	isServerless         bool
 	checkedForServerless bool
+
+	usernameRetrievalMutex *sync.Mutex
+	retrievedUsername      string
+}
+
+func NewConfig(driverName, connStr, database string, maxConns int) *Config {
+	return &Config{
+		DriverName: driverName,
+		ConnStr:    connStr,
+		Database:   database,
+		MaxConns:   maxConns,
+
+		serverlessCheckMutex:   &sync.Mutex{},
+		usernameRetrievalMutex: &sync.Mutex{},
+	}
 }
 
 // Client struct holding connection string
 type Client struct {
-	config       Config
-	databaseName string
+	config Config
 
 	db *sql.DB
 }
@@ -45,10 +51,9 @@ type DBConnection struct {
 }
 
 // NewClient returns client config for the specified database.
-func (c *Config) NewClient(database string) *Client {
+func (c *Config) NewClient() *Client {
 	return &Client{
-		config:       *c,
-		databaseName: database,
+		config: *c,
 	}
 }
 
@@ -64,9 +69,10 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 
 	c.checkedForServerless = true
 
-	_, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
+	rows, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
 	// No error means we have accessed the view and are running Redshift Serverless
 	if err == nil {
+		defer rows.Close()
 		c.isServerless = true
 		return true, nil
 	}
@@ -80,6 +86,27 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 	return false, err
 }
 
+func (c *Config) GetUsername(db *DBConnection) (string, error) {
+	if c.retrievedUsername != "" {
+		return c.retrievedUsername, nil
+	}
+	c.usernameRetrievalMutex.Lock()
+	defer c.usernameRetrievalMutex.Unlock()
+	if c.retrievedUsername != "" {
+		return c.retrievedUsername, nil
+	}
+	row := db.QueryRow("SELECT current_user;")
+	if row.Err() != nil {
+		return "", fmt.Errorf("error retrieving current user: %w", row.Err())
+	}
+	var username string
+	if err := row.Scan(&username); err != nil {
+		return "", fmt.Errorf("error scanning current user: %w", err)
+	}
+	c.retrievedUsername = username
+	return c.retrievedUsername, nil
+}
+
 // Connect returns a copy to an sql.Open()'ed database connection wrapped in a DBConnection struct.
 // Callers must return their database resources. Use of QueryRow() or Exec() is encouraged.
 // Query() must have their rows.Close()'ed.
@@ -87,17 +114,19 @@ func (c *Client) Connect() (*DBConnection, error) {
 	dbRegistryLock.Lock()
 	defer dbRegistryLock.Unlock()
 
-	dsn := c.config.connStr(c.databaseName)
+	dsn := c.config.ConnStr
+	driverName := c.config.DriverName
 	conn, found := dbRegistry[dsn]
-	if !found {
-		db, err := sql.Open(proxyDriverName, dsn)
+
+	if !found || conn.Ping() != nil {
+		db, err := sql.Open(driverName, dsn)
 		if err != nil {
-			return nil, fmt.Errorf("error connecting to PostgreSQL server %q: %w", c.config.Host, err)
+			return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q): %w", driverName, err)
 		}
 
 		// We don't want to retain connection
 		// So when we connect on a specific database which might be managed by terraform,
-		// we don't keep opened connection in case of the db has to be dopped in the plan.
+		// we don't keep opened connection in case of the db has to be dropped in the plan.
 		db.SetMaxIdleConns(0)
 		db.SetMaxOpenConns(c.config.MaxConns)
 
@@ -105,62 +134,16 @@ func (c *Client) Connect() (*DBConnection, error) {
 			db,
 			c,
 		}
+
+		_, err = c.config.GetUsername(conn)
+		if err != nil {
+			return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q, dsn: %q): %w", driverName, dsn, err)
+		}
+
 		dbRegistry[dsn] = conn
 	}
 
 	return conn, nil
-}
-
-func (c *Config) connStr(database string) string {
-	connStr := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?%s",
-		url.QueryEscape(c.Username),
-		url.QueryEscape(c.Password),
-		c.Host,
-		c.Port,
-		database,
-		strings.Join(c.connParams(), "&"),
-	)
-
-	return connStr
-}
-
-func (c *Config) connParams() []string {
-	params := map[string]string{}
-
-	params["sslmode"] = c.SSLMode
-	params["connect_timeout"] = "180"
-
-	var paramsArray []string
-	for key, value := range params {
-		paramsArray = append(paramsArray, fmt.Sprintf("%s=%s", key, url.QueryEscape(value)))
-	}
-
-	return paramsArray
-}
-
-// Client instantiates a new Redshift client.
-func (c *Config) Client() (*Client, error) {
-
-	conninfo := fmt.Sprintf("sslmode=%v user=%v password=%v host=%v port=%v dbname=%v",
-		c.SSLMode,
-		c.Username,
-		c.Password,
-		c.Host,
-		c.Port,
-		c.Database)
-
-	db, err := sql.Open(proxyDriverName, conninfo)
-	if err != nil {
-		return nil, err
-	}
-
-	client := Client{
-		config: *c,
-		db:     db,
-	}
-
-	return &client, nil
 }
 
 func (c *Client) Close() {

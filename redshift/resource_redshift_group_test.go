@@ -74,8 +74,8 @@ func TestAccRedshiftGroup_Update(t *testing.T) {
 		}
 
 		resource "redshift_user" "group_update_user3" {
-			name = %[3]q
-		  }
+		  name = %[3]q
+		}
 		
 		resource "redshift_group" "update_group" {
 		  name = %[4]q

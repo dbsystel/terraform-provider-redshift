@@ -140,7 +140,7 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 }
 
 func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -299,6 +299,12 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	case err != nil:
 		return fmt.Errorf("error reading User: %w", err)
 	}
+
+	userValidUntil, err = validateAndAdjustValidUntil(userValidUntil)
+	if err != nil {
+		return err
+	}
+
 	userConnLimitNumber := -1
 	if userConnLimit != "UNLIMITED" {
 		if userConnLimitNumber, err = strconv.Atoi(userConnLimit); err != nil {
@@ -322,12 +328,35 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	return nil
 }
 
+const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
+
+var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
+var correctDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?\+00$`)
+
+func validateAndAdjustValidUntil(validUntil string) (string, error) {
+	if validUntil == redshiftDataApiInfinityDateString {
+		// The Redshift Data API translates the `infinity` to a date in 2038 (see https://en.wikipedia.org/wiki/Year_2038_problem)
+		return "infinity", nil
+	} else if redshiftDataApiDatetimeRegexp.MatchString(validUntil) {
+		// The Redshift Data API returns the datetime without the timezone offset, so we need to add it
+		validUntil += "+00"
+	}
+	if !correctDatetimeRegexp.MatchString(validUntil) {
+		return "", fmt.Errorf(`received invalid date format for valid_until: %q, expected format is "YYYY-MM-DD HH:MM:SS+00"`, validUntil)
+	}
+	return validUntil, nil
+}
+
 func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error {
 	useSysID := d.Id()
 	userName := d.Get(userNameAttr).(string)
-	newOwnerName := permanentUsername(db.client.config.Username)
+	rawUsername, err := db.client.config.GetUsername(db)
+	if err != nil {
+		return fmt.Errorf("error retrieving username: %w", err)
+	}
+	newOwnerName := permanentUsername(rawUsername)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -429,7 +458,7 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 }
 
 func resourceRedshiftUserUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

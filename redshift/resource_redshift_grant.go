@@ -156,7 +156,7 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 
 	databaseName := getDatabaseName(db, d)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -544,6 +544,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	contains := func(callables []string, objName string) bool {
 		for _, callable := range callables {
@@ -553,7 +554,6 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		}
 		return false
 	}
-	defer rows.Close()
 
 	privilegesSet := schema.NewSet(schema.HashString, nil)
 	for rows.Next() {
@@ -626,9 +626,9 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
 	objects := d.Get(grantObjectsAttr).(*schema.Set)
-	defer rows.Close()
 
 	for rows.Next() {
 		var objName string
@@ -842,7 +842,7 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 }
 
 func getDatabaseName(db *DBConnection, d *schema.ResourceData) string {
-	databaseName := db.client.databaseName
+	databaseName := db.client.config.Database
 	if database, ok := d.GetOk(grantDatabaseAttr); ok {
 		databaseName = database.(string)
 	}

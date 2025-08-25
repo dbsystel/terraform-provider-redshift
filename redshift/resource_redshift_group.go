@@ -64,9 +64,28 @@ func resourceRedshiftGroupReadImpl(db *DBConnection, d *schema.ResourceData) err
 		groupUsers []string
 	)
 
-	query := `SELECT ARRAY(SELECT u.usename FROM pg_user_info u, pg_group g WHERE g.grosysid = $1 AND u.usesysid = ANY(g.grolist)) AS members, groname FROM pg_group WHERE grosysid = $1`
-	if err := db.QueryRow(query, d.Id()).Scan(pq.Array(&groupUsers), &groupName); err != nil {
+	query := `SELECT groname, u.usename FROM pg_user_info u, pg_group g WHERE g.grosysid = $1 AND u.usesysid = ANY(g.grolist);`
+	rows, err := db.Query(query, d.Id())
+	if err != nil {
 		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("could not read group members for group id %q: %w", d.Id(), err)
+		}
+		var userName string
+		if err := rows.Scan(&groupName, &userName); err != nil {
+			return fmt.Errorf("could not read group members for group id %q: %w", d.Id(), err)
+		}
+		groupUsers = append(groupUsers, userName)
+	}
+	if len(groupUsers) == 0 {
+		// no users found so the group name could not be fetched, we have to query for the name
+		query = `SELECT groname FROM pg_group WHERE grosysid = $1;`
+		if err := db.QueryRow(query, d.Id()).Scan(&groupName); err != nil {
+			return err
+		}
 	}
 
 	d.Set(groupNameAttr, groupName)
@@ -78,7 +97,7 @@ func resourceRedshiftGroupReadImpl(db *DBConnection, d *schema.ResourceData) err
 func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -117,7 +136,7 @@ func resourceRedshiftGroupCreate(db *DBConnection, d *schema.ResourceData) error
 func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -151,7 +170,7 @@ func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGroupUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

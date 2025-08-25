@@ -25,6 +25,10 @@ resource "redshift_grant" "public" {
 	schema = %[1]q
 	object_type = "schema"
 	privileges  = ["create", "usage"]
+
+	depends_on = [
+		redshift_schema.test
+	]
 }
 
 # Add user with different privileges to see if we do not catch them by accident
@@ -37,6 +41,10 @@ resource "redshift_grant" "user" {
 	schema = %[1]q
 	object_type = "schema"
 	privileges  = ["usage"]
+
+	depends_on = [
+		redshift_schema.test
+	]
 }
 `, schemaName, userName)
 

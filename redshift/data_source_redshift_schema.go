@@ -276,7 +276,7 @@ func dataSourceRedshiftSchemaRead(db *DBConnection, d *schema.ResourceData) erro
 	LEFT JOIN pg_user_info
 		ON (svv_all_schemas.database_name = $1 AND pg_user_info.usesysid = svv_all_schemas.schema_owner)
 	WHERE svv_all_schemas.database_name = $1
-	AND svv_all_schemas.schema_name = $2`, db.client.databaseName, d.Get(schemaNameAttr).(string)).Scan(&schemaId, &schemaOwner, &schemaType)
+	AND svv_all_schemas.schema_name = $2`, db.client.config.Database, d.Get(schemaNameAttr).(string)).Scan(&schemaId, &schemaOwner, &schemaType)
 	if err != nil {
 		return err
 	}

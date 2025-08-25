@@ -99,7 +99,7 @@ func redshiftDefaultPrivileges() *schema.Resource {
 func resourceRedshiftDefaultPrivilegesDelete(db *DBConnection, d *schema.ResourceData) error {
 	revokeAlterDefaultQuery := createAlterDefaultsRevokeQuery(d)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func resourceRedshiftDefaultPrivilegesCreate(db *DBConnection, d *schema.Resourc
 		return fmt.Errorf(`invalid privileges list %+v for object type %q`, privileges, objectType)
 	}
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	schemaName, schemaNameSet := d.GetOk(defaultPrivilegesSchemaAttr)
 	ownerName := d.Get(defaultPrivilegesOwnerAttr).(string)
 
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}

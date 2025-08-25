@@ -140,7 +140,7 @@ func resourceRedshiftDatabaseCreateFromDatashare(db *DBConnection, d *schema.Res
 
 	// CREATE DATABASE isn't allowed to run inside a transaction, however ALTER DATABASE
 	// can be
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ WHERE pg_database_info.datid = $1
 }
 
 func resourceRedshiftDatabaseUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client, "")
+	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
