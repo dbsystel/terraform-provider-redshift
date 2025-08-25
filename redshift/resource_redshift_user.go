@@ -334,7 +334,9 @@ var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\
 var correctDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?\+00$`)
 
 func validateAndAdjustValidUntil(validUntil string) (string, error) {
-	if validUntil == redshiftDataApiInfinityDateString {
+	if validUntil == "infinity" {
+		return validUntil, nil
+	} else if validUntil == redshiftDataApiInfinityDateString {
 		// The Redshift Data API translates the `infinity` to a date in 2038 (see https://en.wikipedia.org/wiki/Year_2038_problem)
 		return "infinity", nil
 	} else if redshiftDataApiDatetimeRegexp.MatchString(validUntil) {

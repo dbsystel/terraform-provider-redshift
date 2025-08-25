@@ -582,6 +582,14 @@ func Test_validateAndAdjustValidUntil(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "accepts \"infinity\" string",
+			args: args{
+				validUntil: "infinity",
+			},
+			want:    "infinity",
+			wantErr: false,
+		},
+		{
 			name: "returns error for invalid timezone",
 			args: args{
 				validUntil: "2025-08-06 17:22:56+01",
