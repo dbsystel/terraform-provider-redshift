@@ -137,7 +137,7 @@ func (c *Client) Connect() (*DBConnection, error) {
 
 		_, err = c.config.GetUsername(conn)
 		if err != nil {
-			return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q, dsn: %q): %w", driverName, dsn, err)
+			return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q): %w", driverName, err)
 		}
 
 		dbRegistry[dsn] = conn
