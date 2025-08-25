@@ -12,6 +12,8 @@ The Redshift provider provides configuration management resources for
 
 ## Example Usage
 
+Please note that only one authentication method can be used at a time. There is no logic to fall back to another method if the first one fails.
+
 ### Authentication using fixed password
 
 ```terraform
@@ -19,6 +21,18 @@ provider "redshift" {
   host     = var.redshift_host
   username = var.redshift_user
   password = var.redshift_password
+}
+```
+
+### Authentication using Redshift Data API
+
+```terraform
+provider "redshift" {
+  database = var.redshift_database
+  data_api {
+    workgroup_name = var.redshift_workgroup
+    region         = var.aws_region
+  }
 }
 ```
 
