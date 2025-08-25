@@ -121,7 +121,7 @@ func (c *Client) Connect() (*DBConnection, error) {
 	if !found || conn.Ping() != nil {
 		db, err := sql.Open(driverName, dsn)
 		if err != nil {
-			return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q, dsn: %q): %w", driverName, dsn, err)
+			return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q): %w", driverName, err)
 		}
 
 		// We don't want to retain connection
