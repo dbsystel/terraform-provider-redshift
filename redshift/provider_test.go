@@ -156,7 +156,7 @@ func prepareRedshiftTemporaryCredentialsTestCases(t *testing.T, provider *schema
 }
 
 func Test_getConfigFromResourceData(t *testing.T) {
-	defer unsetAndSetEnvVars("AWS_REGION", "AWS_DEFAULT_REGION")()
+	defer unsetAndSetEnvVars("AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST")()
 	type args struct {
 		d *schema.ResourceData
 	}
