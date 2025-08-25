@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
-
-	_ "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
 var (

@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+
+	_ "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
 const redshiftDataDriverName = "redshift-data"
