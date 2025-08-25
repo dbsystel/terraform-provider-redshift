@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 )
 
 // Get the value of an environment variable, or skip the
@@ -24,4 +26,8 @@ func tfArray(s []string) string {
 	semiformat := fmt.Sprintf("%q\n", s)
 	tokens := strings.Split(semiformat, " ")
 	return strings.Join(tokens, ",")
+}
+
+func generateRandomObjectName(prefix string) string {
+	return strings.ReplaceAll(acctest.RandomWithPrefix(prefix), "-", "_")
 }
