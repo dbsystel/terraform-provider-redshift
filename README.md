@@ -29,7 +29,7 @@ Due to limited testing capacities, the following features are not tested/stable 
 This provider *does* support connecting to the Redshift instance using the AWS Redshift Data API. However, this is not
 the default behavior, requires some additional configuration and comes along with some caveats:
 
-* Transactions are not run as real DB-level transactions, but rather as a sequence of individual statements.
+* Transactions are not run as real DB-level transactions, but rather as a sequence of individual statements (`BatchExecuteStatement` executes all statements at once and does not support queries while being in transaction mode).
 * Due to the unsupported state of transactions, interfering DB interactions might lead to unexpected results.
 * In order to
   prevent [errors due to conflicts with concurrent transactions](https://stackoverflow.com/questions/37344942/redshift-could-not-complete-because-of-conflict-with-concurrent-transaction),
