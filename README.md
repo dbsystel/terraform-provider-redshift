@@ -6,7 +6,7 @@ It's published on the [OpenTofu Registry](https://search.opentofu.org/provider/d
 
 ## Requirements
 
-- [Terraform](https://www.terraform.io/downloads.html) >= 1.0
+- [OpenTofu](https://opentofu.org/docs/intro/install/) >= 1.0
 - [Go](https://golang.org/doc/install) 1.24 (to build the provider plugin)
 
 ## Limitations
