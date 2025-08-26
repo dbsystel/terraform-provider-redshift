@@ -201,8 +201,7 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
 	database := d.Get("database").(string)
 	maxConnections := d.Get("max_connections").(int)
-	_, useDataApi := d.GetOk("data_api.0")
-	if useDataApi {
+	if _, useDataApi := d.GetOk("data_api"); useDataApi {
 		return getConfigFromDataApiResourceData(d, database)
 	}
 	return getConfigFromPqResourceData(d, database, maxConnections, temporaryCredentialsResolver)
