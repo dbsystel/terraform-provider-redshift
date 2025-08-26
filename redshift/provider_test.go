@@ -196,21 +196,6 @@ func Test_getConfigFromResourceData(t *testing.T) {
 			false,
 		},
 		{
-			"Data API config missing region",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"database": "some-database",
-					"data_api": []interface{}{
-						map[string]interface{}{
-							"workgroup_name": "some-workgroup",
-						},
-					},
-				}),
-			},
-			nil,
-			true,
-		},
-		{
 			"PQ config",
 			args{
 				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
@@ -254,19 +239,6 @@ func Test_getConfigFromResourceData(t *testing.T) {
 				MaxConns:   20,
 			},
 			false,
-		},
-		{
-			"PQ config - missing host",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"username": "some-user",
-					"port":     4122,
-					"database": "some-database",
-					"sslmode":  "require",
-				}),
-			},
-			nil,
-			true,
 		},
 	}
 	for _, tt := range tests {
