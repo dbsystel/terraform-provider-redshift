@@ -21,11 +21,11 @@ import (
 type temporaryCredentialsResolverFunc func(username string, d *schema.ResourceData) (string, string, error)
 
 func NewPqConfig(host, database, username, password string, port int, sslMode string, maxConns int) *Config {
-	connStr := buildConnStrFromPqConfig(host, database, username, password, port, sslMode, maxConns)
+	connStr := buildConnStrFromPqConfig(host, database, username, password, port, sslMode)
 	return NewConfig(proxyDriverName, connStr, database, maxConns)
 }
 
-func buildConnStrFromPqConfig(host, database, username, password string, port int, sslMode string, maxConns int) string {
+func buildConnStrFromPqConfig(host, database, username, password string, port int, sslMode string) string {
 	params := map[string]string{}
 
 	params["sslmode"] = sslMode
@@ -47,31 +47,14 @@ func buildConnStrFromPqConfig(host, database, username, password string, port in
 		strings.Join(paramsArray, "&"),
 	)
 }
-func getRequiredResourceDataValue[V int | string](d *schema.ResourceData, path string) (V, error) {
-	valueRaw, valuePresent := d.GetOk(path)
-	if !valuePresent {
-		var emptyValue V
-		return emptyValue, fmt.Errorf("attribute %q is required in pq configuration", path)
-	}
-	return valueRaw.(V), nil
-}
 
 func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxConnections int, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
 	var err error
-	var host, username, password, sslMode string
-	var port int
-	if host, err = getRequiredResourceDataValue[string](d, "host"); err != nil {
-		return nil, err
-	}
-	if username, err = getRequiredResourceDataValue[string](d, "username"); err != nil {
-		return nil, err
-	}
-	if port, err = getRequiredResourceDataValue[int](d, "port"); err != nil {
-		return nil, err
-	}
-	if sslMode, err = getRequiredResourceDataValue[string](d, "sslmode"); err != nil {
-		return nil, err
-	}
+	var password string
+	host := d.Get("host").(string)
+	username := d.Get("username").(string)
+	port := d.Get("port").(int)
+	sslMode := d.Get("sslmode").(string)
 	_, useTemporaryCredentials := d.GetOk("temporary_credentials")
 	if useTemporaryCredentials {
 		log.Println("[DEBUG] using temporary credentials authentication")
@@ -82,9 +65,7 @@ func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxCon
 		log.Printf("[DEBUG] got temporary credentials with username %s\n", username)
 	} else {
 		log.Println("[DEBUG] using password authentication")
-		if password, err = getRequiredResourceDataValue[string](d, "password"); err != nil {
-			return nil, err
-		}
+		password = d.Get("password").(string)
 	}
 	return NewPqConfig(host, database, username, password, port, sslMode, maxConnections), nil
 }
