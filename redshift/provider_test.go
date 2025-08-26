@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	redshiftdatasqldriver "github.com/mmichaelb/redshift-data-sql-driver"
@@ -23,7 +26,8 @@ var (
 func init() {
 	testAccProvider = Provider()
 	testAccProviders = map[string]func() (*schema.Provider, error){
-		"redshift": func() (*schema.Provider, error) { return testAccProvider, nil },
+		"redshift":   func() (*schema.Provider, error) { return testAccProvider, nil },
+		"testvalues": getTestValuesProvider,
 	}
 }
 
@@ -291,6 +295,69 @@ func Test_getConfigFromResourceData(t *testing.T) {
 	}
 }
 
+func TestAccProviderCalculatedValues_HostConfig(t *testing.T) {
+	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
+	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
+	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
+	testHostValue := generateRandomObjectName("tf_acc_calc_val_host")
+	cfg := fmt.Sprintf(`
+provider "redshift" {
+  host     = testvalues_value.calculated_host.result
+  password = "somepassword"
+}
+
+resource "testvalues_value" "calculated_host" {
+  value = %[1]q
+}
+
+%[2]s
+`, testHostValue, testDbConfig)
+	resource.ParallelTest(t, resource.TestCase{
+		ProviderFactories: testAccProviders,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				// no such host error should occur, not a missing attribute error
+				ExpectError: regexp.MustCompile(fmt.Sprintf(`dial tcp: lookup %s: no such host`, testHostValue)),
+			},
+		},
+	})
+}
+
+func TestAccProviderCalculatedValues_RedshiftDataConfig(t *testing.T) {
+	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
+	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
+	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
+	testWorkgroupValue := generateRandomObjectName("tf_acc_calc_val_host")
+	cfg := fmt.Sprintf(`
+provider "redshift" {
+  database = "somedb"
+
+  data_api {
+    workgroup_name = testvalues_value.calculated_workgroup.result
+    region         = "us-west-2"
+  }
+}
+
+resource "testvalues_value" "calculated_workgroup" {
+  value = %[1]q
+}
+
+%[2]s
+`, testWorkgroupValue, testDbConfig)
+	fmt.Println(cfg)
+	resource.ParallelTest(t, resource.TestCase{
+		ProviderFactories: testAccProviders,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				// redshift endpoint doesn't exist in this region error should occur, not a missing attribute error
+				ExpectError: regexp.MustCompile(`ValidationException: Redshift endpoint doesn't exist in this region.`),
+			},
+		},
+	})
+}
+
 func unsetAndSetEnvVars(envName ...string) func() {
 	envValues := make(map[string]string)
 	for _, env := range envName {
@@ -307,4 +374,57 @@ func unsetAndSetEnvVars(envName ...string) func() {
 			}
 		}
 	}
+}
+
+type testValuesProvider struct {
+	testValues map[string]interface{}
+}
+
+func (p *testValuesProvider) getProvider() *schema.Provider {
+	return &schema.Provider{
+		ResourcesMap: map[string]*schema.Resource{
+			"testvalues_value": {
+				CreateContext: func(ctx context.Context, data *schema.ResourceData, i interface{}) diag.Diagnostics {
+					value := data.Get("value").(string)
+					data.Set("result", value)
+					data.SetId(value)
+					p.testValues[value] = &struct{}{}
+					return nil
+				},
+				DeleteContext: func(ctx context.Context, data *schema.ResourceData, i interface{}) diag.Diagnostics {
+					value := data.Get("value").(string)
+					delete(p.testValues, value)
+					data.SetId("")
+					return nil
+				},
+				ReadContext: func(ctx context.Context, data *schema.ResourceData, i interface{}) diag.Diagnostics {
+					value := data.Get("value").(string)
+
+					if _, ok := p.testValues[value]; !ok {
+						data.SetId("")
+						return nil
+					} else {
+						data.SetId(value)
+						data.Set("result", value)
+					}
+					return nil
+				},
+				Schema: map[string]*schema.Schema{
+					"value": {
+						Type:     schema.TypeString,
+						Required: true,
+						ForceNew: true,
+					},
+					"result": {
+						Type:     schema.TypeString,
+						Computed: true,
+					},
+				},
+			},
+		},
+	}
+}
+
+func getTestValuesProvider() (*schema.Provider, error) {
+	return (&testValuesProvider{testValues: make(map[string]interface{})}).getProvider(), nil
 }
