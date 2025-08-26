@@ -296,11 +296,8 @@ func Test_getConfigFromResourceData(t *testing.T) {
 }
 
 func TestAccProviderCalculatedValues_HostConfig(t *testing.T) {
-	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
-	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
-	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
 	testHostValue := generateRandomObjectName("tf_acc_calc_val_host")
-	cfg := fmt.Sprintf(`
+	providerConfig := fmt.Sprintf(`
 provider "redshift" {
   host     = testvalues_value.calculated_host.result
   password = "somepassword"
@@ -309,27 +306,15 @@ provider "redshift" {
 resource "testvalues_value" "calculated_host" {
   value = %[1]q
 }
-
-%[2]s
-`, testHostValue, testDbConfig)
-	resource.ParallelTest(t, resource.TestCase{
-		ProviderFactories: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				Config: cfg,
-				// no such host error should occur, not a missing attribute error
-				ExpectError: regexp.MustCompile(fmt.Sprintf(`dial tcp: lookup %s: no such host`, testHostValue)),
-			},
-		},
-	})
+`, testHostValue)
+	expectedError := fmt.Sprintf(`dial tcp: lookup %s: no such host`, testHostValue)
+	// no such host error should occur, not a missing attribute error
+	testCalculatedProviderValues(t, providerConfig, expectedError)
 }
 
 func TestAccProviderCalculatedValues_RedshiftDataConfig(t *testing.T) {
-	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
-	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
-	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
 	testWorkgroupValue := generateRandomObjectName("tf_acc_calc_val_host")
-	cfg := fmt.Sprintf(`
+	providerConfig := fmt.Sprintf(`
 provider "redshift" {
   database = "somedb"
 
@@ -342,17 +327,26 @@ provider "redshift" {
 resource "testvalues_value" "calculated_workgroup" {
   value = %[1]q
 }
+`, testWorkgroupValue)
+	// redshift endpoint doesn't exist in this region error should occur, not a missing attribute error
+	expectedError := "ValidationException: Redshift endpoint doesn't exist in this region."
+	testCalculatedProviderValues(t, providerConfig, expectedError)
+}
 
+func testCalculatedProviderValues(t *testing.T, providerConfig string, expectedError string) {
+	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
+	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
+	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
+	cfg := fmt.Sprintf(`
+%[1]s
 %[2]s
-`, testWorkgroupValue, testDbConfig)
-	fmt.Println(cfg)
+`, providerConfig, testDbConfig)
 	resource.ParallelTest(t, resource.TestCase{
 		ProviderFactories: testAccProviders,
 		Steps: []resource.TestStep{
 			{
-				Config: cfg,
-				// redshift endpoint doesn't exist in this region error should occur, not a missing attribute error
-				ExpectError: regexp.MustCompile(`ValidationException: Redshift endpoint doesn't exist in this region.`),
+				Config:      cfg,
+				ExpectError: regexp.MustCompile(expectedError),
 			},
 		},
 	})
