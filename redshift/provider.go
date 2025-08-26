@@ -23,15 +23,14 @@ func Provider() *schema.Provider {
 				Type:          schema.TypeString,
 				Description:   "Name of Redshift server address to connect to.",
 				Optional:      true,
-				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_HOST", ""),
+				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_HOST", nil),
 				ConflictsWith: []string{"data_api"},
 			},
 			"username": {
-				Type:          schema.TypeString,
-				Optional:      true,
-				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_USER", "root"),
-				Description:   "Redshift user name to connect as.",
-				ConflictsWith: []string{"data_api"},
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_USER", "root"),
+				Description: "Redshift user name to connect as.",
 			},
 			"password": {
 				Type:        schema.TypeString,
@@ -41,15 +40,13 @@ func Provider() *schema.Provider {
 				Sensitive:   true,
 				ConflictsWith: []string{
 					"temporary_credentials",
-					"data_api",
 				},
 			},
 			"port": {
-				Type:          schema.TypeInt,
-				Description:   "The Redshift port number to connect to at the server host.",
-				Optional:      true,
-				DefaultFunc:   schema.EnvDefaultFunc("REDSHIFT_PORT", 5439),
-				ConflictsWith: []string{"data_api"},
+				Type:        schema.TypeInt,
+				Description: "The Redshift port number to connect to at the server host.",
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_PORT", 5439),
 			},
 			"sslmode": {
 				Type:        schema.TypeString,
@@ -62,7 +59,6 @@ func Provider() *schema.Provider {
 					"verify-ca",
 					"verify-full",
 				}, false),
-				ConflictsWith: []string{"data_api"},
 			},
 			"database": {
 				Type:        schema.TypeString,
@@ -71,12 +67,11 @@ func Provider() *schema.Provider {
 				DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_DATABASE", "redshift"),
 			},
 			"max_connections": {
-				Type:          schema.TypeInt,
-				Optional:      true,
-				Default:       defaultProviderMaxOpenConnections,
-				Description:   "Maximum number of connections to establish to the database. Zero means unlimited.",
-				ValidateFunc:  validation.IntAtLeast(-1),
-				ConflictsWith: []string{"data_api"},
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      defaultProviderMaxOpenConnections,
+				Description:  "Maximum number of connections to establish to the database. Zero means unlimited.",
+				ValidateFunc: validation.IntAtLeast(-1),
 			},
 			"data_api": {
 				Type:        schema.TypeList,
@@ -85,12 +80,7 @@ func Provider() *schema.Provider {
 				MaxItems:    1,
 				ConflictsWith: []string{
 					"host",
-					"username",
 					"password",
-					"port",
-					"sslmode",
-					"max_connections",
-					"temporary_credentials",
 				},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{

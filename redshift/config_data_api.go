@@ -24,12 +24,6 @@ func buildConnStrFromDataApiConfig(workgroupName, database, awsRegion string) st
 
 func getConfigFromDataApiResourceData(d *schema.ResourceData, database string) (*Config, error) {
 	workgroupName := d.Get("data_api.0.workgroup_name").(string)
-	if workgroupName == "" {
-		return nil, fmt.Errorf(`attribute "workgroup_name" is required in data_api configuration`)
-	}
 	region := d.Get("data_api.0.region").(string)
-	if region == "" {
-		return nil, fmt.Errorf(`attribute "region" is required in data_api configuration`)
-	}
 	return NewDataApiConfig(workgroupName, database, region, 1), nil
 }
