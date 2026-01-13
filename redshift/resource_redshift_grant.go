@@ -86,7 +86,7 @@ Defines access privileges for users and  groups. Privileges include access optio
 				Optional:     true,
 				ForceNew:     true,
 				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
-				Description:  "The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.",
+				Description:  "The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.", // todo: change when role grants are read back from the system tables
 				StateFunc: func(val interface{}) string {
 					return strings.ToLower(val.(string))
 				},
@@ -217,7 +217,7 @@ func resourceRedshiftGrantRead(db *DBConnection, d *schema.ResourceData) error {
 func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) error {
 	objectType := d.Get(grantObjectTypeAttr).(string)
 
-	// For roles, we currently don't read back from system tables
+	// todo: For roles, we currently don't read back from system tables
 	// The GRANT was executed successfully, so we trust the state
 	if _, isRole := d.GetOk(grantRoleAttr); isRole {
 		return nil
