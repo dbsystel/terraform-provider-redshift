@@ -56,10 +56,11 @@ resource "redshift_grant" "public" {
 ### Optional
 
 - `database` (String) The name of the database to grant privileges on. Only used when `object_type` is `database`. By default, the database to which the provider is connected will be used
-- `group` (String) The name of the group to grant privileges on. Either `group` or `user` parameter must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.
+- `group` (String) The name of the group to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.
 - `objects` (Set of String) The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type. Ignored when `object_type` is one of (`database`, `schema`).
+- `role` (String) The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.
 - `schema` (String) The database schema to grant privileges on.
-- `user` (String) The name of the user to grant privileges on. Either `user` or `group` parameter must be set.
+- `user` (String) The name of the user to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.
 
 ### Read-Only
 
