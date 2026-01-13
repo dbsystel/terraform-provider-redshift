@@ -122,28 +122,12 @@ resource "redshift_role_grant" "lead_gets_admin" {
 }
 
 # =============================================================================
-# 5. Also works with Groups!
-# =============================================================================
-
-resource "redshift_group" "analysts_group" {
-  name = "all_analysts"
-}
-
-# Grant readonly role to the entire group
-resource "redshift_role_grant" "group_gets_readonly" {
-  role_name      = redshift_role.readonly.name
-  grant_to_type  = "group"
-  grant_to_name  = redshift_group.analysts_group.name
-}
-
-# =============================================================================
 # Result Summary:
 # =============================================================================
 # 
 # junior_analyst   → readonly_role        → SELECT
 # senior_analyst   → readwrite_role       → SELECT + INSERT + UPDATE
 # lead_analyst     → admin_role           → SELECT + INSERT + UPDATE + DELETE + DROP
-# all_analysts     → readonly_role        → SELECT
 #
 # NO DUPLICATION! Each permission is defined once at the role level.
 # Changes to readonly_role automatically propagate to readwrite_role and admin_role.

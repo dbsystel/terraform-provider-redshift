@@ -20,7 +20,7 @@ const (
 func redshiftRoleGrant() *schema.Resource {
 	return &schema.Resource{
 		Description: `
-Grants a role to a user, group, or another role. This allows hierarchical role-based access control in Redshift.
+Grants a role to a user or another role. This allows hierarchical role-based access control in Redshift.
 
 When a role is granted to another role, the recipient role inherits all privileges of the granted role. 
 This enables role inheritance chains where permissions can be organized hierarchically.
@@ -49,11 +49,11 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				Description: "The type of principal to grant the role to. Valid values are: 'user', 'group', or 'role'.",
+				Description: "The type of principal to grant the role to. Valid values are: 'user' or 'role'.",
 				ValidateFunc: func(val any, key string) (warns []string, errs []error) {
 					v := strings.ToLower(val.(string))
-					if v != "user" && v != "group" && v != "role" {
-						errs = append(errs, fmt.Errorf("%q must be one of: 'user', 'group', 'role', got: %s", key, val))
+					if v != "user" && v != "role" {
+						errs = append(errs, fmt.Errorf("%q must be one of: 'user', 'role', got: %s", key, val))
 					}
 					return
 				},
@@ -65,7 +65,7 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				Description: "The name of the user, group, or role to grant this role to.",
+				Description: "The name of the user, or role to grant this role to.",
 				StateFunc: func(val any) string {
 					return strings.ToLower(val.(string))
 				},
@@ -88,17 +88,18 @@ func resourceRedshiftRoleGrantCreate(db *DBConnection, d *schema.ResourceData) e
 	// GRANT ROLE syntax in Redshift:
 	// - For USER: GRANT ROLE role TO username (no USER keyword)
 	// - For ROLE: GRANT ROLE role TO ROLE rolename (ROLE keyword required)
-	// - For GROUP: GRANT ROLE role TO GROUP groupname (GROUP keyword required)
 	var query string
-	if grantToType == "USER" {
+	switch grantToType {
+	case "USER":
 		query = fmt.Sprintf("GRANT ROLE %s TO %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
-	} else {
-		query = fmt.Sprintf("GRANT ROLE %s TO %s %s",
+	case "ROLE":
+		query = fmt.Sprintf("GRANT ROLE %s TO ROLE %s",
 			pq.QuoteIdentifier(roleName),
-			grantToType,
 			pq.QuoteIdentifier(grantToName))
+	default:
+		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
 
 	log.Printf("[DEBUG] %s\n", query)
@@ -143,9 +144,6 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 			WHERE LOWER(granted_role_name) = LOWER($1)
 			AND LOWER(role_name) = LOWER($2)
 		`
-	case "GROUP":
-		// SVV_GROUP_GRANTS doesn't exist, trust the state
-		return nil
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -186,17 +184,18 @@ func resourceRedshiftRoleGrantDelete(db *DBConnection, d *schema.ResourceData) e
 	// REVOKE ROLE syntax in Redshift:
 	// - For USER: REVOKE ROLE role FROM username (no USER keyword)
 	// - For ROLE: REVOKE ROLE role FROM ROLE rolename (ROLE keyword required)
-	// - For GROUP: REVOKE ROLE role FROM GROUP groupname (GROUP keyword required)
 	var query string
-	if grantToType == "USER" {
+	switch grantToType {
+	case "USER":
 		query = fmt.Sprintf("REVOKE ROLE %s FROM %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
-	} else {
-		query = fmt.Sprintf("REVOKE ROLE %s FROM %s %s",
+	case "ROLE":
+		query = fmt.Sprintf("REVOKE ROLE %s FROM ROLE %s",
 			pq.QuoteIdentifier(roleName),
-			grantToType,
 			pq.QuoteIdentifier(grantToName))
+	default:
+		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
 
 	log.Printf("[DEBUG] %s\n", query)
