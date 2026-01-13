@@ -13,7 +13,7 @@ jobs:
       run: git fetch --prune --unshallow
 
     - name: Set up Go
-      uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
 
     - name: Run tests
       run: make test
