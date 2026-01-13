@@ -65,14 +65,14 @@ func resourceRedshiftRoleCreate(db *DBConnection, d *schema.ResourceData) error 
 	// Query SVV_ROLES to get the role info (similar to how datashares use SVV_DATASHARES)
 	// SVV_ROLES should have: role_name, role_owner, role_id
 	var roleId string
-	query = "SELECT role_name FROM SVV_ROLES WHERE role_name = $1"
-	log.Printf("[DEBUG] %s, $1=%s\n", query, strings.ToLower(roleName))
-	if err := tx.QueryRow(query, strings.ToLower(roleName)).Scan(&roleId); err != nil {
+	query = "SELECT role_id FROM SVV_ROLES WHERE role_name = $1"
+	log.Printf("[DEBUG] %s, $1=%s\n", query, roleName)
+	if err := tx.QueryRow(query, roleName).Scan(&roleId); err != nil {
 		return fmt.Errorf("could not verify role creation for %q: %w", roleName, err)
 	}
 
-	// Use role name as ID (similar to datashare using share_id)
-	d.SetId(strings.ToLower(roleName))
+	// Use role id as ID (similar to groups using grosysid)
+	d.SetId(roleId)
 
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
@@ -85,7 +85,7 @@ func resourceRedshiftRoleRead(db *DBConnection, d *schema.ResourceData) error {
 	var roleName string
 
 	// Query SVV_ROLES (similar to SVV_DATASHARES pattern)
-	query := "SELECT role_name FROM SVV_ROLES WHERE role_name = $1"
+	query := "SELECT role_name FROM SVV_ROLES WHERE role_id = $1"
 	log.Printf("[DEBUG] %s, $1=%s\n", query, d.Id())
 
 	err := db.QueryRow(query, d.Id()).Scan(&roleName)
@@ -127,9 +127,6 @@ func resourceRedshiftRoleUpdate(db *DBConnection, d *schema.ResourceData) error 
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("could not commit transaction: %w", err)
 		}
-
-		// Update the ID to the new name
-		d.SetId(strings.ToLower(newName))
 	}
 
 	return resourceRedshiftRoleRead(db, d)
@@ -142,20 +139,21 @@ func resourceRedshiftRoleDelete(db *DBConnection, d *schema.ResourceData) error 
 	}
 	defer deferredRollback(tx)
 
-	// Check if role exists in SVV_ROLES
-	var exists bool
-	query := "SELECT EXISTS(SELECT 1 FROM SVV_ROLES WHERE role_name = $1)"
-	if err := tx.QueryRow(query, d.Id()).Scan(&exists); err != nil {
+	// Check if role exists in SVV_ROLES and get role name
+	var roleName string
+	query := "SELECT role_name FROM SVV_ROLES WHERE role_id = $1"
+	log.Printf("[DEBUG] %s, $1=%s\n", query, d.Id())
+	if err := tx.QueryRow(query, d.Id()).Scan(&roleName); err != nil {
 		return err
 	}
 
-	if !exists {
+	if roleName == "" {
 		log.Printf("[WARN] Role with name %s does not exist.\n", d.Id())
 		return nil
 	}
 
 	// Drop the role
-	query = fmt.Sprintf("DROP ROLE %s", pq.QuoteIdentifier(d.Id()))
+	query = fmt.Sprintf("DROP ROLE %s", pq.QuoteIdentifier(roleName))
 	log.Printf("[DEBUG] %s\n", query)
 
 	if _, err := tx.Exec(query); err != nil {
