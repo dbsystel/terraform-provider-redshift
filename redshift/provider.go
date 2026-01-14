@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"regexp"
 
@@ -193,7 +194,13 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
 	database := d.Get("database").(string)
 	maxConnections := d.Get("max_connections").(int)
-	if _, useDataApi := d.GetOk("data_api"); useDataApi {
+	_, useDataApi := d.GetOk("data_api.0.workgroup_name")
+	_, usePqResourceData := d.GetOk("host")
+
+	if useDataApi && usePqResourceData {
+		return nil, fmt.Errorf("using both auth methods 'data_api' and 'host' is not allowed")
+	}
+	if useDataApi {
 		return getConfigFromDataApiResourceData(d, database)
 	}
 	return getConfigFromPqResourceData(d, database, maxConnections, temporaryCredentialsResolver)
