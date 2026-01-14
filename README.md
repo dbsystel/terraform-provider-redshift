@@ -66,6 +66,10 @@ TF_ACC_TERRAFORM_PATH=<path to tofu binary>
 REDSHIFT_DATABASE=redshift
 REDSHIFT_ROOT_USERNAME=someotherroot
 
+# redshift external schema data catalog test setup
+REDSHIFT_EXTERNAL_SCHEMA_DATA_CATALOG_DATABASE=<data catalog database>
+REDSHIFT_EXTERNAL_SCHEMA_DATA_CATALOG_IAM_ROLE_ARNS=<iam role arns comma separated>
+
 # user + password setup
 REDSHIFT_HOST=<cluster ip or DNS>
 REDSHIFT_USER=root
@@ -102,39 +106,4 @@ Use `go generate` to update generated docs.
 
 ## Releasing
 
-Builds and releases are automated with GitHub Actions and [GoReleaser](https://github.com/goreleaser/goreleaser/).
-The changelog is managed
-with [github-changelog-generator](https://github.com/github-changelog-generator/github-changelog-generator).
-
-Currently there are a few manual steps to this:
-
-1. Update the changelog:
-
-   ```sh
-   RELEASE_VERSION=v... \
-   CHANGELOG_GITHUB_TOKEN=... \
-   make changelog
-   ```
-
-   This will commit the changelog locally.
-
-2. Review generated changelog and push:
-
-   View the committed changelog with `git show`. If all is well `git push origin
-   master`.
-
-3. Kick off the release:
-
-   ```sh
-   RELEASE_VERSION=v... \
-   make release
-   ```
-
-   Once the command exits, you can monitor the rest of the process on the
-   [Actions UI](https://github.com/dbsystel/terraform-provider-redshift/actions?query=workflow%3Arelease).
-
-4. Publish release:
-
-   The Action creates the release, but leaves it in "draft" state. Open it up in
-   a [browser](https://github.com/dbsystel/terraform-provider-redshift/releases)
-   and if all looks well, click the publish button.
+Builds and releases are automated with GitHub Actions and [GoReleaser](https://github.com/goreleaser/goreleaser/). To kick off the release, simply create a new tag. The GitHub Release Action will run automatically and as soon as the release is drafted and everything looks good, you can publish it manually.
