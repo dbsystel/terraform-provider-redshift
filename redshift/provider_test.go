@@ -42,11 +42,13 @@ func TestProvider_impl(t *testing.T) {
 }
 
 func testAccPreCheck(t *testing.T) {
-	var host string
-	if host = os.Getenv("REDSHIFT_HOST"); host == "" {
-		t.Fatal("REDSHIFT_HOST must be set for acceptance tests")
+	workgroupName := os.Getenv("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")
+	host := os.Getenv("REDSHIFT_HOST")
+	if workgroupName != "" && host != "" {
+		t.Fatal("Either REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME or REDSHIFT_HOST must be set for acceptance tests")
 	}
-	if v := os.Getenv("REDSHIFT_USER"); v == "" {
+	user := os.Getenv("REDSHIFT_USER")
+	if host != "" && user == "" {
 		t.Fatal("REDSHIFT_USER must be set for acceptance tests")
 	}
 	if v := os.Getenv("REDSHIFT_TEST_ACC_DEBUG_REDSHIFT_DATA"); v != "" {
