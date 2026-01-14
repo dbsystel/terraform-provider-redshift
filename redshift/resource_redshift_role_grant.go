@@ -41,24 +41,18 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 				Required:    true,
 				ForceNew:    true,
 				Description: "The name of the role to grant.",
-				StateFunc: func(val any) string {
-					return strings.ToLower(val.(string))
-				},
 			},
 			roleGrantGrantToTypeAttr: {
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				Description: "The type of principal to grant the role to. Valid values are: 'user' or 'role'.",
+				Description: "The type of principal to grant the role to. Valid values are: 'USER' or 'ROLE'.",
 				ValidateFunc: func(val any, key string) (warns []string, errs []error) {
-					v := strings.ToLower(val.(string))
-					if v != "user" && v != "role" {
-						errs = append(errs, fmt.Errorf("%q must be one of: 'user', 'role', got: %s", key, val))
+					v := val.(string)
+					if v != "USER" && v != "ROLE" {
+						errs = append(errs, fmt.Errorf("%q must be one of: 'USER', 'ROLE', got: %s", key, val))
 					}
 					return
-				},
-				StateFunc: func(val any) string {
-					return strings.ToLower(val.(string))
 				},
 			},
 			roleGrantGrantToNameAttr: {
@@ -66,9 +60,6 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 				Required:    true,
 				ForceNew:    true,
 				Description: "The name of the user, or role to grant this role to.",
-				StateFunc: func(val any) string {
-					return strings.ToLower(val.(string))
-				},
 			},
 		},
 	}
@@ -76,7 +67,7 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 
 func resourceRedshiftRoleGrantCreate(db *DBConnection, d *schema.ResourceData) error {
 	roleName := d.Get(roleGrantRoleNameAttr).(string)
-	grantToType := strings.ToUpper(d.Get(roleGrantGrantToTypeAttr).(string))
+	grantToType := d.Get(roleGrantGrantToTypeAttr).(string)
 	grantToName := d.Get(roleGrantGrantToNameAttr).(string)
 
 	tx, err := startTransaction(db.client)
@@ -94,10 +85,12 @@ func resourceRedshiftRoleGrantCreate(db *DBConnection, d *schema.ResourceData) e
 		query = fmt.Sprintf("GRANT ROLE %s TO %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
+		break
 	case "ROLE":
 		query = fmt.Sprintf("GRANT ROLE %s TO ROLE %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
+		break
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -126,7 +119,7 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 	var exists int
 	var query string
 
-	switch strings.ToUpper(grantToType) {
+	switch grantToType {
 	case "USER":
 		// Check SVV_USER_GRANTS for role grants to users
 		query = `
@@ -135,6 +128,7 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 			WHERE LOWER(role_name) = LOWER($1)
 			AND LOWER(user_name) = LOWER($2)
 		`
+		break
 	case "ROLE":
 		// Check SVV_ROLE_GRANTS for role grants to other roles
 		// Note: role_name is the grantee (child), granted_role_name is the granted role (parent)
@@ -144,6 +138,7 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 			WHERE LOWER(granted_role_name) = LOWER($1)
 			AND LOWER(role_name) = LOWER($2)
 		`
+		break
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -164,16 +159,10 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 }
 
 func resourceRedshiftRoleGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	// Parse ID to get the values to revoke
-	// ID format: "role:rolename:type:targetname"
-	parts := strings.Split(d.Id(), ":")
-	if len(parts) != 4 {
-		return fmt.Errorf("invalid role grant ID format: %s", d.Id())
+	roleName, grantToType, grantToName, err := parseRoleGrantId(d.Id())
+	if err != nil {
+		return err
 	}
-
-	roleName := parts[1]
-	grantToType := strings.ToUpper(parts[2])
-	grantToName := parts[3]
 
 	tx, err := startTransaction(db.client)
 	if err != nil {
@@ -190,10 +179,12 @@ func resourceRedshiftRoleGrantDelete(db *DBConnection, d *schema.ResourceData) e
 		query = fmt.Sprintf("REVOKE ROLE %s FROM %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
+		break
 	case "ROLE":
 		query = fmt.Sprintf("REVOKE ROLE %s FROM ROLE %s",
 			pq.QuoteIdentifier(roleName),
 			pq.QuoteIdentifier(grantToName))
+		break
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -225,4 +216,17 @@ func generateRoleGrantID(roleName, grantToType, grantToName string) string {
 		strings.ToLower(roleName),
 		strings.ToLower(grantToType),
 		strings.ToLower(grantToName))
+}
+
+func parseRoleGrantId(roleGrantId string) (roleName, grantToType, grantToName string, err error) {
+	// Parse ID to get the values to revoke
+	// ID format: "role:rolename:type:targetname"
+	parts := strings.Split(roleGrantId, ":")
+	if len(parts) != 4 {
+		return "", "", "", fmt.Errorf("invalid role grant ID format: %s", roleGrantId)
+	}
+	roleName = parts[1]
+	grantToType = strings.ToUpper(parts[2])
+	grantToName = parts[3]
+	return roleName, grantToType, grantToName, nil
 }
