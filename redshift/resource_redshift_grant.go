@@ -15,6 +15,7 @@ import (
 const (
 	grantUserAttr       = "user"
 	grantGroupAttr      = "group"
+	grantRoleAttr       = "role"
 	grantDatabaseAttr   = "database"
 	grantSchemaAttr     = "schema"
 	grantObjectTypeAttr = "object_type"
@@ -62,22 +63,32 @@ Defines access privileges for users and  groups. Privileges include access optio
 				Type:         schema.TypeString,
 				Optional:     true,
 				ForceNew:     true,
-				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr},
-				Description:  "The name of the user to grant privileges on. Either `user` or `group` parameter must be set.",
+				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
+				Description:  "The name of the user to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.",
 				ValidateFunc: validation.StringDoesNotMatch(regexp.MustCompile("^(?i)public$"), "User name cannot be 'public'. To use GRANT ... TO PUBLIC set the group name to 'public' instead."),
 			},
 			grantGroupAttr: {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ForceNew:     true,
-				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr},
-				Description:  "The name of the group to grant privileges on. Either `group` or `user` parameter must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.",
+				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
+				Description:  "The name of the group to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.",
 				StateFunc: func(val interface{}) string {
 					name := val.(string)
 					if strings.ToLower(name) == grantToPublicName {
 						return strings.ToLower(name)
 					}
 					return name
+				},
+			},
+			grantRoleAttr: {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
+				Description:  "The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.", // todo: change when role grants are read back from the system tables
+				StateFunc: func(val interface{}) string {
+					return strings.ToLower(val.(string))
 				},
 			},
 			grantSchemaAttr: {
@@ -205,6 +216,12 @@ func resourceRedshiftGrantRead(db *DBConnection, d *schema.ResourceData) error {
 
 func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) error {
 	objectType := d.Get(grantObjectTypeAttr).(string)
+
+	// todo: For roles, we currently don't read back from system tables
+	// The GRANT was executed successfully, so we trust the state
+	if _, isRole := d.GetOk(grantRoleAttr); isRole {
+		return nil
+	}
 
 	switch objectType {
 	case "database":
@@ -682,6 +699,9 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 		entityName = groupName.(string)
 	} else if userName, isUser := d.GetOk(grantUserAttr); isUser {
 		entityName = userName.(string)
+	} else if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		toWhomIndicator = "ROLE"
+		entityName = roleName.(string)
 	}
 
 	fromEntityName := pq.QuoteIdentifier(entityName)
@@ -768,6 +788,9 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 		entityName = groupName.(string)
 	} else if userName, isUser := d.GetOk(grantUserAttr); isUser {
 		entityName = userName.(string)
+	} else if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		toWhomIndicator = "ROLE"
+		entityName = roleName.(string)
 	}
 
 	toEntityName := pq.QuoteIdentifier(entityName)
