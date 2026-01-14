@@ -134,7 +134,7 @@ func TestAccRedshiftTemporaryCredentialsAssumeRole(t *testing.T) {
 
 func TestAccRedshiftDataApiServerlessConnect(t *testing.T) {
 	_ = getEnvOrSkip("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", t)
-	defer unsetAndSetEnvVars("REDSHIFT_HOST")()
+	unsetAndSetEnvVars(t, "REDSHIFT_HOST")
 	provider := Provider()
 	provider.Configure(context.Background(), terraform.NewResourceConfigRaw(map[string]interface{}{}))
 	client, ok := provider.Meta().(*Client)
@@ -160,7 +160,7 @@ func prepareRedshiftTemporaryCredentialsTestCases(t *testing.T, provider *schema
 }
 
 func Test_getConfigFromResourceData(t *testing.T) {
-	defer unsetAndSetEnvVars("AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST")()
+	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST")
 	type args struct {
 		d *schema.ResourceData
 	}
@@ -285,6 +285,7 @@ resource "testvalues_value" "calculated_host" {
 }
 
 func TestAccProviderCalculatedValues_RedshiftDataConfig(t *testing.T) {
+	_ = getEnvOrSkip("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", t)
 	testWorkgroupValue := generateRandomObjectName("tf_acc_calc_val_host")
 	providerConfig := fmt.Sprintf(`
 provider "redshift" {
@@ -306,14 +307,14 @@ resource "testvalues_value" "calculated_workgroup" {
 }
 
 func testCalculatedProviderValues(t *testing.T, providerConfig string, expectedError string) {
-	defer unsetAndSetEnvVars("REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")()
+	unsetAndSetEnvVars(t, "REDSHIFT_DATABASE", "REDSHIFT_HOST", "REDSHIFT_USER", "REDSHIFT_PASSWORD", "REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME")
 	testDbName := generateRandomObjectName("tf_acc_calc_val_db")
 	testDbConfig := testAccDataSourceRedshiftDatabaseConfigBasic(testDbName)
 	cfg := fmt.Sprintf(`
 %[1]s
 %[2]s
 `, providerConfig, testDbConfig)
-	resource.ParallelTest(t, resource.TestCase{
+	resource.Test(t, resource.TestCase{
 		ProviderFactories: testAccProviders,
 		Steps: []resource.TestStep{
 			{
@@ -324,22 +325,17 @@ func testCalculatedProviderValues(t *testing.T, providerConfig string, expectedE
 	})
 }
 
-func unsetAndSetEnvVars(envName ...string) func() {
-	envValues := make(map[string]string)
-	for _, env := range envName {
-		envValue := os.Getenv(env)
-		if envValue != "" {
-			envValues[env] = envValue
-			os.Unsetenv(env)
-		}
+func unsetAndSetEnvVars(t *testing.T, envNames ...string) {
+	envKeys := map[string]string{}
+	for _, envName := range envNames {
+		envKeys[envName] = os.Getenv(envName)
+		_ = os.Unsetenv(envName)
 	}
-	return func() {
-		for key, value := range envValues {
-			if err := os.Setenv(key, value); err != nil {
-				fmt.Printf("Failed to set environment variable %s: %v\n", key, err)
-			}
+	t.Cleanup(func() {
+		for key, value := range envKeys {
+			_ = os.Setenv(key, value)
 		}
-	}
+	})
 }
 
 type testValuesProvider struct {
