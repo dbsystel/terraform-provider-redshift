@@ -116,7 +116,7 @@ func testAccCheckRedshiftRoleDestroy(s *terraform.State) error {
 		}
 
 		if exists {
-			return fmt.Errorf("group still exists after destroy")
+			return fmt.Errorf("role still exists after destroy")
 		}
 	}
 
