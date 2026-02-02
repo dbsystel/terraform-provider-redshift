@@ -967,6 +967,10 @@ func generateGrantID(d *schema.ResourceData) string {
 		parts = append(parts, fmt.Sprintf("un:%s", d.Get(grantUserAttr).(string)))
 	}
 
+	if _, isRole := d.GetOk(grantRoleAttr); isRole {
+		parts = append(parts, fmt.Sprintf("rn:%s", d.Get(grantRoleAttr).(string)))
+	}
+
 	objectType := fmt.Sprintf("ot:%s", d.Get(grantObjectTypeAttr).(string))
 	parts = append(parts, objectType)
 
