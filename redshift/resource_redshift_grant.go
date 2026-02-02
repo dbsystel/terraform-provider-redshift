@@ -271,7 +271,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 		query = `
   SELECT
     COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
-    COALESCE(MAX(CASE WHEN privilege_type = 'TEMPORARY' THEN 1 ELSE 0 END), 0) AS TEMPORARY,
+    COALESCE(MAX(CASE WHEN privilege_type = 'TEMP' THEN 1 ELSE 0 END), 0) AS TEMPORARY,
     COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
   FROM svv_database_privileges
   WHERE database_name = $1
