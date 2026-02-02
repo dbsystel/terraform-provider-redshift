@@ -217,12 +217,6 @@ func resourceRedshiftGrantRead(db *DBConnection, d *schema.ResourceData) error {
 func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) error {
 	objectType := d.Get(grantObjectTypeAttr).(string)
 
-	// todo: For roles, we currently don't read back from system tables
-	// The GRANT was executed successfully, so we trust the state
-	if _, isRole := d.GetOk(grantRoleAttr); isRole {
-		return nil
-	}
-
 	switch objectType {
 	case "database":
 		return readDatabaseGrants(db, d)
@@ -246,6 +240,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 	databaseName := getDatabaseName(db, d)
 
 	_, isUser := d.GetOk(grantUserAttr)
+	_, isGroup := d.GetOk(grantGroupAttr)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -259,7 +254,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
     db.datname=$1 
     AND u.usename=$2
 `
-	} else {
+	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
   SELECT
@@ -270,6 +265,18 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
   WHERE
     db.datname=$1 
     AND gr.groname=$2
+`
+	} else {
+		entityName = d.Get(grantRoleAttr).(string)
+		query = `
+  SELECT
+    COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
+    COALESCE(MAX(CASE WHEN privilege_type = 'TEMPORARY' THEN 1 ELSE 0 END), 0) AS TEMPORARY,
+    COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
+  FROM svv_database_privileges
+  WHERE database_name = $1
+    AND identity_name = $2
+    AND identity_type = 'role'
 `
 	}
 
@@ -310,6 +317,7 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
 	var schemaCreate, schemaUsage bool
 
 	_, isUser := d.GetOk(grantUserAttr)
+	_, isGroup := d.GetOk(grantGroupAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 
 	if isUser {
@@ -323,7 +331,7 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
 		ns.nspname=$1 
 		AND u.usename=$2
 	`
-	} else {
+	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
   SELECT
@@ -333,6 +341,17 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
   WHERE
     ns.nspname=$1 
     AND gr.groname=$2
+`
+	} else {
+		entityName = d.Get(grantRoleAttr).(string)
+		query = `
+  SELECT
+    COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
+    COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
+  FROM svv_schema_privileges
+  WHERE namespace_name = $1
+    AND identity_name = $2
+    AND identity_type = 'role'
 `
 	}
 
@@ -370,6 +389,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	log.Printf("[DEBUG] Reading table grants")
 	var entityName, query string
 	_, isUser := d.GetOk(grantUserAttr)
+	_, isGroup := d.GetOk(grantGroupAttr)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -391,7 +411,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     AND u.usename=$2
     AND nsp.nspname=$3
 `
-	} else {
+	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
   SELECT
@@ -410,6 +430,28 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     cl.relkind = ANY($1)
     AND gr.groname=$2
     AND nsp.nspname=$3
+`
+	} else {
+		entityName = d.Get(grantRoleAttr).(string)
+		query = `
+  SELECT
+    t.table_name,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'SELECT' THEN 1 ELSE 0 END), 0) AS SELECT,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'UPDATE' THEN 1 ELSE 0 END), 0) AS UPDATE,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'INSERT' THEN 1 ELSE 0 END), 0) AS INSERT,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'DELETE' THEN 1 ELSE 0 END), 0) AS DELETE,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'DROP' THEN 1 ELSE 0 END), 0) AS DROP,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'REFERENCES' THEN 1 ELSE 0 END), 0) AS REFERENCES,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'RULE' THEN 1 ELSE 0 END), 0) AS rule,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'TRIGGER' THEN 1 ELSE 0 END), 0) AS TRIGGER
+  FROM SVV_ALL_TABLES t
+  LEFT JOIN svv_relation_privileges p
+    ON p.relation_name = t.table_name
+    AND p.namespace_name = t.schema_name
+    AND p.identity_name = $2
+    AND p.identity_type = 'role'
+  WHERE t.schema_name = $3
+  GROUP BY t.table_name
 `
 	}
 
@@ -503,6 +545,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	var entityName, query string
 
 	_, isUser := d.GetOk(grantUserAttr)
+	_, isGroup := d.GetOk(grantGroupAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objectType := d.Get(grantObjectTypeAttr).(string)
 
@@ -520,7 +563,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		AND u.usename=$2
 		AND pr.prokind=ANY($3)
 `
-	} else {
+	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
 	SELECT
@@ -533,6 +576,19 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		nsp.nspname=$1 
     AND gr.groname=$2
 		AND pr.prokind=ANY($3)
+`
+	} else {
+		entityName = d.Get(grantRoleAttr).(string)
+		query = `
+	SELECT
+		p.function_name,
+		COALESCE(MAX(CASE WHEN p.privilege_type = 'EXECUTE' THEN 1 ELSE 0 END), 0) AS EXECUTE
+	FROM svv_function_privileges p
+	JOIN svv_redshift_functions pr ON pr.function_name = p.function_name AND pr.schema_name = p.namespace_name
+	WHERE p.namespace_name = $1
+		AND p.identity_name = $2
+	AND p.identity_type = 'role'
+	GROUP BY p.function_name
 `
 	}
 
@@ -603,6 +659,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
 	var entityName, query string
 
 	_, isUser := d.GetOk(grantUserAttr)
+	_, isGroup := d.GetOk(grantGroupAttr)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -614,7 +671,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
   WHERE
     u.usename=$1
 `
-	} else {
+	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
   SELECT
@@ -623,6 +680,18 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
   FROM pg_language lg, pg_group gr
   WHERE
     gr.groname=$1
+`
+	} else {
+		entityName = d.Get(grantRoleAttr).(string)
+		query = `
+SELECT
+	p.language_name,
+	COALESCE(MAX(CASE WHEN p.privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
+FROM svv_language_privileges p
+JOIN pg_language lg ON lg.lanname = p.language_name
+WHERE p.identity_name = $1
+	AND p.identity_type = 'role'
+GROUP BY p.language_name
 `
 	}
 
