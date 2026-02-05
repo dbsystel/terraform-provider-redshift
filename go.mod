@@ -12,7 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6
 	github.com/hashicorp/terraform-plugin-docs v0.24.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.38.1
-	github.com/lib/pq v1.10.9
+	github.com/lib/pq v1.11.0
 	github.com/mmichaelb/redshift-data-sql-driver v0.4.0
 	golang.org/x/net v0.49.0
 )
