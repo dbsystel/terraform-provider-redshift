@@ -55,6 +55,7 @@ func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxCon
 	username := d.Get("username").(string)
 	port := d.Get("port").(int)
 	sslMode := d.Get("sslmode").(string)
+	log.Printf("[DEBUG] using username %q for authentication\n", username)
 	_, useTemporaryCredentials := d.GetOk("temporary_credentials")
 	if useTemporaryCredentials {
 		log.Println("[DEBUG] using temporary credentials authentication")
