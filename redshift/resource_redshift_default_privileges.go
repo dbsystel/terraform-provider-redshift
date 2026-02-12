@@ -15,6 +15,7 @@ import (
 const (
 	defaultPrivilegesUserAttr       = "user"
 	defaultPrivilegesGroupAttr      = "group"
+	defaultPrivilegesRoleAttr       = "role"
 	defaultPrivilegesOwnerAttr      = "owner"
 	defaultPrivilegesSchemaAttr     = "schema"
 	defaultPrivilegesPrivilegesAttr = "privileges"
@@ -25,10 +26,6 @@ const (
 
 var defaultPrivilegesAllowedObjectTypes = []string{
 	"table",
-}
-
-var defaultPrivilegesObjectTypesCodes = map[string]string{
-	"table": "r",
 }
 
 func redshiftDefaultPrivileges() *schema.Resource {
@@ -57,15 +54,22 @@ func redshiftDefaultPrivileges() *schema.Resource {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ForceNew:     true,
-				ExactlyOneOf: []string{defaultPrivilegesGroupAttr, defaultPrivilegesUserAttr},
+				ExactlyOneOf: []string{defaultPrivilegesGroupAttr, defaultPrivilegesUserAttr, defaultPrivilegesRoleAttr},
 				Description:  "The name of the  group to which the specified default privileges are applied.",
 			},
 			defaultPrivilegesUserAttr: {
 				Type:         schema.TypeString,
 				Optional:     true,
 				ForceNew:     true,
-				ExactlyOneOf: []string{defaultPrivilegesGroupAttr, defaultPrivilegesUserAttr},
+				ExactlyOneOf: []string{defaultPrivilegesGroupAttr, defaultPrivilegesUserAttr, defaultPrivilegesRoleAttr},
 				Description:  "The name of the user to which the specified default privileges are applied.",
+			},
+			defaultPrivilegesRoleAttr: {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ForceNew:     true,
+				ExactlyOneOf: []string{defaultPrivilegesGroupAttr, defaultPrivilegesUserAttr, defaultPrivilegesRoleAttr},
+				Description:  "The name of the role to which the specified default privileges are applied.",
 			},
 			defaultPrivilegesOwnerAttr: {
 				Type:        schema.TypeString,
@@ -157,9 +161,6 @@ func resourceRedshiftDefaultPrivilegesRead(db *DBConnection, d *schema.ResourceD
 }
 
 func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.ResourceData) error {
-	var entityID int
-	var entityIsUser bool
-	schemaName, schemaNameSet := d.GetOk(defaultPrivilegesSchemaAttr)
 	ownerName := d.Get(defaultPrivilegesOwnerAttr).(string)
 
 	tx, err := startTransaction(db.client)
@@ -167,31 +168,6 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 		return err
 	}
 	defer deferredRollback(tx)
-
-	schemaID := defaultPrivilegesAllSchemasID
-	if schemaNameSet {
-		log.Printf("[DEBUG] getting ID for schema %s\n", schemaName)
-		schemaID, err = getSchemaIDFromName(tx, schemaName.(string))
-		if err != nil {
-			return fmt.Errorf("failed to get schema ID for schema '%s': %w", schemaName, err)
-		}
-	}
-
-	if groupName, groupNameSet := d.GetOk(defaultPrivilegesGroupAttr); groupNameSet {
-		log.Printf("[DEBUG] getting ID for group %s\n", groupName.(string))
-		entityID, err = getGroupIDFromName(tx, groupName.(string))
-		entityIsUser = false
-		if err != nil {
-			return fmt.Errorf("failed to get group ID: %w", err)
-		}
-	} else if userName, userNameSet := d.GetOk(defaultPrivilegesUserAttr); userNameSet {
-		log.Printf("[DEBUG] getting ID for user %s\n", userName.(string))
-		entityID, err = getUserIDFromName(tx, userName.(string))
-		entityIsUser = true
-		if err != nil {
-			return fmt.Errorf("failed to get user ID: %w", err)
-		}
-	}
 
 	log.Printf("[DEBUG] getting ID for owner %s\n", ownerName)
 	ownerID, err := getUserIDFromName(tx, ownerName)
@@ -202,7 +178,7 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	switch strings.ToUpper(d.Get(defaultPrivilegesObjectTypeAttr).(string)) {
 	case "TABLE":
 		log.Println("[DEBUG] reading default privileges")
-		if err := readGroupTableDefaultPrivileges(tx, d, entityID, schemaID, ownerID, entityIsUser); err != nil {
+		if err := readGroupTableDefaultPrivileges(tx, d, ownerID); err != nil {
 			return fmt.Errorf("failed to read table privileges: %w", err)
 		}
 	}
@@ -214,51 +190,45 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 	return nil
 }
 
-func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, entityID, schemaID, ownerID int, entityIsUser bool) error {
+func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID int) error {
 	var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableRule, tableTrigger bool
+
+	var entityName string
+	var entityType string
 	var query string
 
-	if entityIsUser {
-		query = `
-	      SELECT 
-		decode(charindex('r',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS SELECT,
-		decode(charindex('w',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS UPDATE,
-		decode(charindex('a',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS INSERT,
-		decode(charindex('d',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS DELETE,
-		decode(charindex('D',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS DROP,
-		decode(charindex('x',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS REFERENCES,
-		decode(charindex('R',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS rule,
-		decode(charindex('t',split_part(split_part(regexp_replace(replace(array_to_string(defaclacl, '|'), '"', ''), 'group '||u.usename), u.usename||'=', 2) ,'/',1)),0,0,1) AS TRIGGER
-	      FROM pg_user u, pg_default_acl acl
-	      WHERE 
-		acl.defaclnamespace = $1
-		AND regexp_replace(replace(array_to_string(acl.defaclacl, '|'), '"', ''), 'group '||u.usename) LIKE '%' || u.usename || '=%'
-		AND u.usesysid = $2
-		AND acl.defaclobjtype = $3
-		AND acl.defacluser = $4
-		`
-	} else {
-		query = `
-	      SELECT 
-		decode(charindex('r',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS SELECT,
-		decode(charindex('w',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS UPDATE,
-		decode(charindex('a',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS INSERT,
-		decode(charindex('d',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS DELETE,
-		decode(charindex('D',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS DROP,
-		decode(charindex('x',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS REFERENCES,
-		decode(charindex('R',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS rule,
-		decode(charindex('t',split_part(split_part(replace(array_to_string(defaclacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)),0,0,1) AS TRIGGER
-	      FROM pg_group gr, pg_default_acl acl
-	      WHERE 
-		acl.defaclnamespace = $1
-		AND replace(array_to_string(acl.defaclacl, '|'), '"', '') LIKE '%' || 'group ' || gr.groname || '=%'
-		AND gr.grosysid = $2
-		AND acl.defaclobjtype = $3
-		AND acl.defacluser = $4
-		`
+	schemaName, schemaNameSet := d.GetOk(defaultPrivilegesSchemaAttr)
+
+	if groupName, groupNameSet := d.GetOk(defaultPrivilegesGroupAttr); groupNameSet {
+		entityName = groupName.(string)
+		entityType = "group"
+	} else if userName, userNameSet := d.GetOk(defaultPrivilegesUserAttr); userNameSet {
+		entityName = userName.(string)
+		entityType = "user"
+	} else if roleName, roleNameSet := d.GetOk(defaultPrivilegesRoleAttr); roleNameSet {
+		entityName = roleName.(string)
+		entityType = "role"
 	}
 
-	if err := tx.QueryRow(query, schemaID, entityID, defaultPrivilegesObjectTypesCodes["table"], ownerID).Scan(
+	query = `
+		SELECT
+			COALESCE(MAX(CASE WHEN privilege_type = 'SELECT' THEN 1 ELSE 0 END), 0) AS SELECT,
+			COALESCE(MAX(CASE WHEN privilege_type = 'UPDATE' THEN 1 ELSE 0 END), 0) AS UPDATE,
+			COALESCE(MAX(CASE WHEN privilege_type = 'INSERT' THEN 1 ELSE 0 END), 0) AS INSERT,
+			COALESCE(MAX(CASE WHEN privilege_type = 'DELETE' THEN 1 ELSE 0 END), 0) AS DELETE,
+			COALESCE(MAX(CASE WHEN privilege_type = 'DROP' THEN 1 ELSE 0 END), 0) AS DROP,
+			COALESCE(MAX(CASE WHEN privilege_type = 'REFERENCES' THEN 1 ELSE 0 END), 0) AS REFERENCES,
+			COALESCE(MAX(CASE WHEN privilege_type = 'RULE' THEN 1 ELSE 0 END), 0) AS RULE,
+			COALESCE(MAX(CASE WHEN privilege_type = 'TRIGGER' THEN 1 ELSE 0 END), 0) AS TRIGGER
+		FROM svv_default_privileges
+		WHERE object_type = 'RELATION'
+			AND grantee_name = $1
+			AND grantee_type = $2
+			AND owner_id = $3
+			AND (($4::boolean = false AND schema_name IS NULL) OR ($4::boolean = true AND schema_name = $5))
+		`
+
+	if err := tx.QueryRow(query, entityName, entityType, ownerID, schemaNameSet, schemaName).Scan(
 		&tableSelect,
 		&tableUpdate,
 		&tableInsert,
@@ -280,7 +250,7 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, entityI
 	appendIfTrue(tableRule, "rule", &privileges)
 	appendIfTrue(tableTrigger, "trigger", &privileges)
 
-	log.Printf("[DEBUG] Collected privileges for ID %d: %v\n", entityID, privileges)
+	log.Printf("[DEBUG] Collected privileges for entity %s %s: %v\n", entityType, entityName, privileges)
 
 	d.Set(defaultPrivilegesPrivilegesAttr, privileges)
 
@@ -294,6 +264,8 @@ func generateDefaultPrivilegesID(d *schema.ResourceData) string {
 		entityName = fmt.Sprintf("gn:%s", groupName.(string))
 	} else if userName, isUser := d.GetOk(defaultPrivilegesUserAttr); isUser {
 		entityName = fmt.Sprintf("un:%s", userName.(string))
+	} else if roleName, isRole := d.GetOk(defaultPrivilegesRoleAttr); isRole {
+		entityName = fmt.Sprintf("rn:%s", roleName.(string))
 	}
 
 	if schemaNameRaw, schemaNameSet := d.GetOk(defaultPrivilegesSchemaAttr); schemaNameSet {
@@ -321,6 +293,9 @@ func createAlterDefaultsGrantQuery(d *schema.ResourceData, privileges []string) 
 		toWhomIndicator = "GROUP"
 	} else if userName, isUser := d.GetOk(defaultPrivilegesUserAttr); isUser {
 		entityName = userName.(string)
+	} else if roleName, isRole := d.GetOk(defaultPrivilegesRoleAttr); isRole {
+		entityName = roleName.(string)
+		toWhomIndicator = "ROLE"
 	}
 
 	alterQuery := fmt.Sprintf("ALTER DEFAULT PRIVILEGES FOR USER %s", pq.QuoteIdentifier(ownerName))
@@ -350,6 +325,9 @@ func createAlterDefaultsRevokeQuery(d *schema.ResourceData) string {
 		fromWhomIndicator = "GROUP"
 	} else if userName, isUser := d.GetOk(defaultPrivilegesUserAttr); isUser {
 		entityName = userName.(string)
+	} else if roleName, isRole := d.GetOk(defaultPrivilegesRoleAttr); isRole {
+		entityName = roleName.(string)
+		fromWhomIndicator = "ROLE"
 	}
 
 	alterQuery := fmt.Sprintf("ALTER DEFAULT PRIVILEGES FOR USER %s", pq.QuoteIdentifier(ownerName))
