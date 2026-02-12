@@ -387,9 +387,15 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
 
 func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	log.Printf("[DEBUG] Reading table grants")
+
 	var entityName, query string
+	var queryArgs []interface{}
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
+
+	databaseName := getDatabaseName(db, d)
+	schemaName := d.Get(grantSchemaAttr).(string)
+	objects := d.Get(grantObjectsAttr).(*schema.Set)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -411,6 +417,9 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     AND u.usename=$2
     AND nsp.nspname=$3
 `
+		queryArgs = []interface{}{
+			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
+		}
 	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
@@ -431,6 +440,9 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     AND gr.groname=$2
     AND nsp.nspname=$3
 `
+		queryArgs = []interface{}{
+			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
+		}
 	} else {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
@@ -451,14 +463,12 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     AND p.identity_name = $2
     AND p.identity_type = 'role'
   WHERE t.schema_name = $3
+    and t.database_name = $4
   GROUP BY t.table_name
 `
-	}
-
-	schemaName := d.Get(grantSchemaAttr).(string)
-	objects := d.Get(grantObjectsAttr).(*schema.Set)
-	queryArgs := []interface{}{
-		pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
+		queryArgs = []interface{}{
+			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName, databaseName,
+		}
 	}
 
 	if isGrantToPublic(d) {
@@ -543,11 +553,14 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	log.Printf("[DEBUG] Reading callable grants")
 
 	var entityName, query string
+	var queryArgs []interface{}
 
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objectType := d.Get(grantObjectTypeAttr).(string)
+
+	databaseName := getDatabaseName(db, d)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -563,6 +576,9 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		AND u.usename=$2
 		AND pr.prokind=ANY($3)
 `
+		queryArgs = []interface{}{
+			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
+		}
 	} else if isGroup {
 		entityName = d.Get(grantGroupAttr).(string)
 		query = `
@@ -577,6 +593,9 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
     AND gr.groname=$2
 		AND pr.prokind=ANY($3)
 `
+		queryArgs = []interface{}{
+			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
+		}
 	} else {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
@@ -587,15 +606,16 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	JOIN svv_redshift_functions pr ON pr.function_name = p.function_name AND pr.schema_name = p.namespace_name
 	WHERE p.namespace_name = $1
 		AND p.identity_name = $2
-	AND p.identity_type = 'role'
+		AND p.identity_type = 'role'
+        AND pr.database_name = $4
 	GROUP BY p.function_name
 `
+		queryArgs = []interface{}{
+			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]), databaseName,
+		}
 	}
 
 	callables := stripArgumentsFromCallablesDefinitions(d.Get(grantObjectsAttr).(*schema.Set))
-	queryArgs := []interface{}{
-		schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
-	}
 
 	if isGrantToPublic(d) {
 		query = `
