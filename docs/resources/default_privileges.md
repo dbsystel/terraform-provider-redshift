@@ -40,6 +40,7 @@ resource "redshift_default_privileges" "user" {
 ### Optional
 
 - `group` (String) The name of the  group to which the specified default privileges are applied.
+- `role` (String) The name of the role to which the specified default privileges are applied.
 - `schema` (String) If set, the specified default privileges are applied to new objects created in the specified schema. In this case, the user or user group that is the target of ALTER DEFAULT PRIVILEGES must have CREATE privilege for the specified schema. Default privileges that are specific to a schema are added to existing global default privileges. By default, default privileges are applied globally to the entire database.
 - `user` (String) The name of the user to which the specified default privileges are applied.
 
