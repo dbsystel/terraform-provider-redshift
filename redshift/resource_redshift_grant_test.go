@@ -172,9 +172,14 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
+	roleNames := []string{
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role"), "-", "_"),
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role@tf_acc_domain.tld"), "-", "_"),
+	}
 
 	for i, groupName := range groupNames {
 		userName := userNames[i]
+		roleName := roleNames[i]
 		config := fmt.Sprintf(`
 		resource "redshift_group" "group" {
 		  name = %[1]q
@@ -183,6 +188,10 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 		resource "redshift_user" "user" {
 		  name = %[2]q
 		  password = "TestPassword123"
+		}
+
+		resource "redshift_role" "role" {
+		  name = %[3]q
 		}
 		
 		resource "redshift_grant" "grant" {
@@ -196,7 +205,13 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 		  object_type = "database"
 		  privileges = ["temporary"]
 		}
-		`, groupName, userName)
+
+		resource "redshift_grant" "grant_role" {
+		  role = redshift_role.role.name
+		  object_type = "database"
+		  privileges = ["create", "temporary", "usage]
+		}
+		`, groupName, userName, roleName)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { testAccPreCheck(t) },
 			ProviderFactories: testAccProviders,
@@ -217,6 +232,12 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "object_type", "database"),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "privileges.#", "1"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "temporary"),
+
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "id", fmt.Sprintf("rn:%s_ot:database", roleName)),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "role", roleName),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "object_type", "database"),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "privileges.#", "1"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "temporary"),
 					),
 				},
 			},
@@ -233,10 +254,15 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
+	roleNames := []string{
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role"), "-", "_"),
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role@tf_acc_domain.tld"), "-", "_"),
+	}
 	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_basic"), "-", "_")
 
 	for i, groupName := range groupNames {
 		userName := userNames[i]
+		roleName := roleNames[i]
 		config := fmt.Sprintf(`
 		resource "redshift_user" "user" {
 		  name = %[1]q
@@ -245,7 +271,11 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 		resource "redshift_group" "group" {
 		  name = %[2]q
 		}
-		
+
+		resource "redshift_role" "role" {
+		  name = %[4]q
+		}
+
 		resource "redshift_schema" "schema" {
 		  name = %[3]q
 		
@@ -259,7 +289,15 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 		  object_type = "schema"
 		  privileges = ["create", "usage"]
 		}
+
+		resource "redshift_grant" "grant_role" {
+		  role = redshift_role.role.name
+		  schema = redshift_schema.schema.name
 		
+		  object_type = "schema"
+		  privileges = ["create", "usage"]
+		}
+
 		resource "redshift_grant" "grant_user" {
 		  user = redshift_user.user.name
 		  schema = redshift_schema.schema.name
@@ -267,7 +305,7 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 		  object_type = "schema"
 		  privileges = ["create", "usage"]
 		}
-		`, userName, groupName, schemaName)
+		`, userName, groupName, schemaName, roleName)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { testAccPreCheck(t) },
 			ProviderFactories: testAccProviders,
@@ -289,6 +327,13 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "privileges.#", "2"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "create"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "usage"),
+
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "id", fmt.Sprintf("rn:%s_ot:schema_%s", roleName, schemaName)),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "role", roleName),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "object_type", "schema"),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "privileges.#", "2"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "create"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "usage"),
 					),
 				},
 			},
@@ -305,12 +350,21 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
+	roleNames := []string{
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role"), "-", "_"),
+		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_role@tf_acc_domain.tld"), "-", "_"),
+	}
 
 	for i, groupName := range groupNames {
 		userName := userNames[i]
+		roleName := roleNames[i]
 		config := fmt.Sprintf(`
 		resource "redshift_group" "group" {
 		  name = %[1]q
+		}
+
+		resource "redshift_role" "role" {
+		  name = %[3]q
 		}
 		
 		resource "redshift_user" "user" {
@@ -326,7 +380,16 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		  objects = ["pg_user_info"]
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
+
+		resource "redshift_grant" "grant_role" {
+		  role = redshift_role.role.name
+		  schema = "pg_catalog"
 		
+		  object_type = "table"
+		  objects = ["pg_user_info"]
+		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		}
+
 		resource "redshift_grant" "grant_user" {
 		  user = redshift_user.user.name
 		  schema = "pg_catalog"
@@ -335,7 +398,7 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		  objects = ["pg_user_info"]
 		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
 		}
-		`, groupName, userName)
+		`, groupName, userName, roleName)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { testAccPreCheck(t) },
 			ProviderFactories: testAccProviders,
@@ -375,6 +438,22 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "references"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "rule"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "trigger"),
+
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "id", fmt.Sprintf("rn:%s_ot:table_pg_catalog_pg_user_info", roleName)),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "role", roleName),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "schema", "pg_catalog"),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "object_type", "table"),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "objects.#", "1"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "objects.*", "pg_user_info"),
+						resource.TestCheckResourceAttr("redshift_grant.grant_role", "privileges.#", "8"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "select"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "update"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "delete"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "drop"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "references"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "rule"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_role", "privileges.*", "trigger"),
 					),
 				},
 			},
