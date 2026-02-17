@@ -20,6 +20,8 @@ const databaseDatashareSourceShareNameAttr = "share_name"
 const databaseDatashareSourceNamespaceAttr = "namespace"
 const databaseDatashareSourceAccountAttr = "account_id"
 const databaseDatashareSourceWithPermissions = "with_permissions"
+const databaseZeroETLIntegrationAttr = "zeroetl_integration"
+const databaseZeroETLIntegrationIdAttr = "integration_id"
 
 func redshiftDatabase() *schema.Resource {
 	return &schema.Resource{
@@ -55,10 +57,11 @@ func redshiftDatabase() *schema.Resource {
 				ValidateFunc: validation.IntAtLeast(-1),
 			},
 			databaseDatashareSourceAttr: {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "Configuration for creating a database from a redshift datashare.",
+				Type:         schema.TypeList,
+				Optional:     true,
+				MaxItems:     1,
+				Description:  "Configuration for creating a database from a redshift datashare.",
+				ExactlyOneOf: []string{databaseDatashareSourceAttr, databaseZeroETLIntegrationAttr},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						databaseDatashareSourceShareNameAttr: {
@@ -93,6 +96,23 @@ func redshiftDatabase() *schema.Resource {
 							ForceNew:    true,
 							Description: "Whether the database requires object-level permissions to access individual database objects",
 							Default:     false,
+						},
+					},
+				},
+			},
+			databaseZeroETLIntegrationAttr: {
+				Type:         schema.TypeList,
+				Optional:     true,
+				MaxItems:     1,
+				Description:  "Configuration for creating a database from a zero ETL integration.",
+				ExactlyOneOf: []string{databaseDatashareSourceAttr, databaseZeroETLIntegrationAttr},
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						databaseZeroETLIntegrationIdAttr: {
+							Type:        schema.TypeString,
+							Required:    true,
+							ForceNew:    true,
+							Description: "The unique identifier of the zero ETL integration",
 						},
 					},
 				},
@@ -173,6 +193,12 @@ func resourceRedshiftDatabaseCreateFromDatashare(db *DBConnection, d *schema.Res
 func resourceRedshiftDatabaseCreateInternal(db *DBConnection, d *schema.ResourceData) error {
 	dbName := d.Get(databaseNameAttr).(string)
 	query := fmt.Sprintf("CREATE DATABASE %s", pq.QuoteIdentifier(dbName))
+
+	// Handle Zero ETL integration source if specified
+	if _, isZeroETLIntegration := d.GetOk(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)); isZeroETLIntegration {
+		integrationId := d.Get(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)).(string)
+		query = fmt.Sprintf("%s FROM INTEGRATION %s", query, pq.QuoteLiteral(integrationId))
+	}
 
 	if v, ok := d.GetOk(databaseOwnerAttr); ok {
 		query = fmt.Sprintf("%s OWNER %s", query, pq.QuoteIdentifier(v.(string)))
