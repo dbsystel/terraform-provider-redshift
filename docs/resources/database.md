@@ -52,6 +52,7 @@ resource "redshift_database" "datashare_db" {
 - `connection_limit` (Number) The maximum number of concurrent connections that can be made to this database. A value of -1 means no limit.
 - `datashare_source` (Block List, Max: 1) Configuration for creating a database from a redshift datashare. (see [below for nested schema](#nestedblock--datashare_source))
 - `owner` (String) Owner of the database, usually the user who created it
+- `zeroetl_integration` (Block List, Max: 1) Configuration for creating a database from a zero ETL integration. (see [below for nested schema](#nestedblock--zeroetl_integration))
 
 ### Read-Only
 
@@ -69,3 +70,11 @@ Optional:
 
 - `account_id` (String) The AWS account ID of the producer cluster.
 - `with_permissions` (Boolean) Whether the database requires object-level permissions to access individual database objects
+
+
+<a id="nestedblock--zeroetl_integration"></a>
+### Nested Schema for `zeroetl_integration`
+
+Required:
+
+- `integration_id` (String) The unique identifier of the zero ETL integration
