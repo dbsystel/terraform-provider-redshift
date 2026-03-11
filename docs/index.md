@@ -83,8 +83,11 @@ provider "redshift" {
 
 Required:
 
-- `region` (String) The AWS region where the Redshift Serverless workgroup is located. If not specified, the region will be determined from the AWS SDK configuration.
 - `workgroup_name` (String) The name of the Redshift Serverless workgroup to connect to.
+
+Optional:
+
+- `region` (String) The AWS region where the Redshift Serverless workgroup is located. If not specified, the region will be determined from the AWS SDK configuration.
 
 
 <a id="nestedblock--temporary_credentials"></a>
