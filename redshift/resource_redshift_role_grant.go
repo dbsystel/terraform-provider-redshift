@@ -159,10 +159,9 @@ func resourceRedshiftRoleGrantRead(db *DBConnection, d *schema.ResourceData) err
 }
 
 func resourceRedshiftRoleGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	roleName, grantToType, grantToName, err := parseRoleGrantId(d.Id())
-	if err != nil {
-		return err
-	}
+	roleName := d.Get(roleGrantRoleNameAttr).(string)
+	grantToType := d.Get(roleGrantGrantToTypeAttr).(string) // Already lowercase from StateFunc
+	grantToName := d.Get(roleGrantGrantToNameAttr).(string)
 
 	tx, err := startTransaction(db.client)
 	if err != nil {
@@ -216,17 +215,4 @@ func generateRoleGrantID(roleName, grantToType, grantToName string) string {
 		strings.ToLower(roleName),
 		strings.ToLower(grantToType),
 		strings.ToLower(grantToName))
-}
-
-func parseRoleGrantId(roleGrantId string) (roleName, grantToType, grantToName string, err error) {
-	// Parse ID to get the values to revoke
-	// ID format: "role:rolename:type:targetname"
-	parts := strings.Split(roleGrantId, ":")
-	if len(parts) != 4 {
-		return "", "", "", fmt.Errorf("invalid role grant ID format: %s", roleGrantId)
-	}
-	roleName = parts[1]
-	grantToType = strings.ToUpper(parts[2])
-	grantToName = parts[3]
-	return roleName, grantToType, grantToName, nil
 }
