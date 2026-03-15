@@ -1,6 +1,6 @@
 module github.com/dbsystel/terraform-provider-redshift
 
-go 1.24.0
+go 1.25.0
 
 toolchain go1.26.1
 
@@ -14,7 +14,7 @@ require (
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.39.0
 	github.com/lib/pq v1.11.2
 	github.com/mmichaelb/redshift-data-sql-driver v0.4.0
-	golang.org/x/net v0.50.0
+	golang.org/x/net v0.51.0
 )
 
 require (
