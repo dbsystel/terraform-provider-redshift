@@ -241,6 +241,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
+	_, isRole := d.GetOk(grantRoleAttr)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -266,7 +267,7 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
     db.datname=$1 
     AND gr.groname=$2
 `
-	} else {
+	} else if isRole {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
   SELECT
@@ -318,6 +319,7 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
+	_, isRole := d.GetOk(grantRoleAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 
 	if isUser {
@@ -342,7 +344,7 @@ func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
     ns.nspname=$1 
     AND gr.groname=$2
 `
-	} else {
+	} else if isRole {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
   SELECT
@@ -392,7 +394,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	var queryArgs []interface{}
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
-
+	_, isRole := d.GetOk(grantRoleAttr)
 	databaseName := getDatabaseName(db, d)
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objects := d.Get(grantObjectsAttr).(*schema.Set)
@@ -443,7 +445,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 		queryArgs = []interface{}{
 			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
 		}
-	} else {
+	} else if isRole {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
   SELECT
@@ -557,6 +559,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
+	_, isRole := d.GetOk(grantRoleAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objectType := d.Get(grantObjectTypeAttr).(string)
 
@@ -596,7 +599,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		queryArgs = []interface{}{
 			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
 		}
-	} else {
+	} else if isRole {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
 	SELECT
@@ -680,6 +683,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
+	_, isRole := d.GetOk(grantRoleAttr)
 
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
@@ -701,7 +705,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
   WHERE
     gr.groname=$1
 `
-	} else {
+	} else if isRole {
 		entityName = d.Get(grantRoleAttr).(string)
 		query = `
 SELECT
