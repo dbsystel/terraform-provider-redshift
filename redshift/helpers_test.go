@@ -10,8 +10,18 @@ func TestValidatePrivileges(t *testing.T) {
 		objectType string
 		expected   bool
 	}{
+		"valid list for database": {
+			privileges: []string{"create", "usage", "temporary", "temp", "alter"},
+			objectType: "database",
+			expected:   true,
+		},
+		"invalid list for database": {
+			privileges: []string{"create", "execute"},
+			objectType: "database",
+			expected:   false,
+		},
 		"valid list for schema": {
-			privileges: []string{"create", "usage"},
+			privileges: []string{"create", "usage", "alter", "drop"},
 			objectType: "schema",
 			expected:   true,
 		},
@@ -31,13 +41,23 @@ func TestValidatePrivileges(t *testing.T) {
 			expected:   true,
 		},
 		"valid list for table": {
-			privileges: []string{"insert", "update", "delete", "select", "drop", "references", "rule", "trigger"},
+			privileges: []string{"select", "insert", "update", "delete", "drop", "references", "alter", "truncate"},
 			objectType: "table",
 			expected:   true,
 		},
 		"invalid list for table": {
 			privileges: []string{"foobar"},
-			objectType: "schema",
+			objectType: "table",
+			expected:   false,
+		},
+		"unsupported list for table (rule)": {
+			privileges: []string{"rule"},
+			objectType: "table",
+			expected:   false,
+		},
+		"unsupported list for table (trigger)": {
+			privileges: []string{"trigger"},
+			objectType: "table",
 			expected:   false,
 		},
 		"extended invalid list for table": {
