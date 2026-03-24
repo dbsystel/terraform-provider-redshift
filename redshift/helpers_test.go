@@ -31,13 +31,23 @@ func TestValidatePrivileges(t *testing.T) {
 			expected:   true,
 		},
 		"valid list for table": {
-			privileges: []string{"insert", "update", "delete", "select", "drop", "references", "rule", "trigger"},
+			privileges: []string{"select", "insert", "update", "delete", "drop", "references", "alter", "truncate"},
 			objectType: "table",
 			expected:   true,
 		},
 		"invalid list for table": {
 			privileges: []string{"foobar"},
-			objectType: "schema",
+			objectType: "table",
+			expected:   false,
+		},
+		"unsupported list for table (rule)": {
+			privileges: []string{"rule"},
+			objectType: "table",
+			expected:   false,
+		},
+		"unsupported list for table (trigger)": {
+			privileges: []string{"trigger"},
+			objectType: "table",
 			expected:   false,
 		},
 		"extended invalid list for table": {
