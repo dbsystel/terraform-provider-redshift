@@ -169,7 +169,7 @@ func validatePrivileges(privileges []string, objectType string) bool {
 		case "DATABASE":
 			switch strings.ToUpper(p) {
 			// USAGE is only available from databases created from datashares
-			case "CREATE", "TEMPORARY", "USAGE":
+			case "CREATE", "USAGE", "TEMPORARY", "TEMP", "ALTER":
 				continue
 			default:
 				return false

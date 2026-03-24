@@ -10,6 +10,16 @@ func TestValidatePrivileges(t *testing.T) {
 		objectType string
 		expected   bool
 	}{
+		"valid list for database": {
+			privileges: []string{"create", "usage", "temporary", "temp", "alter"},
+			objectType: "database",
+			expected:   true,
+		},
+		"invalid list for database": {
+			privileges: []string{"create", "execute"},
+			objectType: "database",
+			expected:   false,
+		},
 		"valid list for schema": {
 			privileges: []string{"create", "usage", "alter", "drop"},
 			objectType: "schema",
