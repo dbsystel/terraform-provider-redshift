@@ -11,7 +11,7 @@ func TestValidatePrivileges(t *testing.T) {
 		expected   bool
 	}{
 		"valid list for schema": {
-			privileges: []string{"create", "usage"},
+			privileges: []string{"create", "usage", "alter", "drop"},
 			objectType: "schema",
 			expected:   true,
 		},
