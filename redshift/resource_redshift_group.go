@@ -69,16 +69,24 @@ func resourceRedshiftGroupReadImpl(db *DBConnection, d *schema.ResourceData) err
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		if err = rows.Err(); err != nil {
+			_ = rows.Close()
 			return fmt.Errorf("could not read group members for group id %q: %w", d.Id(), err)
 		}
 		var userName string
-		if err := rows.Scan(&groupName, &userName); err != nil {
+		if err = rows.Scan(&groupName, &userName); err != nil {
+			_ = rows.Close()
 			return fmt.Errorf("could not read group members for group id %q: %w", d.Id(), err)
 		}
 		groupUsers = append(groupUsers, userName)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("could not read group members for group id %q: %w", d.Id(), err)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("could not close group members rows for group id %q: %w", d.Id(), err)
 	}
 	if len(groupUsers) == 0 {
 		// no users found so the group name could not be fetched, we have to query for the name
@@ -146,14 +154,26 @@ func resourceRedshiftGroupDelete(db *DBConnection, d *schema.ResourceData) error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+
+	var schemaNames []string
 
 	for rows.Next() {
 		var schemaName string
-		if err := rows.Scan(&schemaName); err != nil {
+		if err = rows.Scan(&schemaName); err != nil {
+			_ = rows.Close()
 			return err
 		}
+		schemaNames = append(schemaNames, schemaName)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
 
+	for _, schemaName := range schemaNames {
 		if _, err := tx.Exec(fmt.Sprintf("REVOKE ALL ON ALL TABLES IN SCHEMA %s FROM GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName))); err != nil {
 			return err
 		}

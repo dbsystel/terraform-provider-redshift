@@ -50,14 +50,14 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 		  group = redshift_group.group.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 		
 		resource "redshift_default_privileges" "user" {
 		  user = redshift_user.user.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 
 		resource "redshift_default_privileges" "role" {
@@ -80,26 +80,26 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 						resource.TestCheckResourceAttr("redshift_default_privileges.group", "object_type", "table"),
 						resource.TestCheckResourceAttr("redshift_default_privileges.group", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "truncate"),
 
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "id", fmt.Sprintf("un:%s_noschema_on:%s_ot:table", userName, rootUsername)),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "user", userName),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "object_type", "table"),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "truncate"),
 
 						resource.TestCheckResourceAttr("redshift_default_privileges.role", "id", fmt.Sprintf("rn:%s_noschema_on:%s_ot:table", roleName, rootUsername)),
 						resource.TestCheckResourceAttr("redshift_default_privileges.role", "role", roleName),
@@ -111,8 +111,8 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "truncate"),
 					),
 				},
 			},
@@ -156,14 +156,14 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		  group = redshift_group.group.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 		
 		resource "redshift_default_privileges" "user" {
 		  user = redshift_user.user.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 
 		resource "redshift_default_privileges" "role" {
@@ -200,6 +200,8 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		  owner = %[3]q
 		  object_type = "table"
 		  privileges = []
+
+          depends_on = [redshift_default_privileges.group]
 		}
 
 		resource "redshift_default_privileges" "role" {
@@ -222,26 +224,26 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 						resource.TestCheckResourceAttr("redshift_default_privileges.group", "object_type", "table"),
 						resource.TestCheckResourceAttr("redshift_default_privileges.group", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.group", "privileges.*", "truncate"),
 
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "id", fmt.Sprintf("un:%s_noschema_on:%s_ot:table", userName, rootUsername)),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "user", userName),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "object_type", "table"),
 						resource.TestCheckResourceAttr("redshift_default_privileges.user", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "truncate"),
 
 						resource.TestCheckResourceAttr("redshift_default_privileges.role", "id", fmt.Sprintf("rn:%s_noschema_on:%s_ot:table", roleName, rootUsername)),
 						resource.TestCheckResourceAttr("redshift_default_privileges.role", "role", roleName),
@@ -253,8 +255,8 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_default_privileges.role", "privileges.*", "truncate"),
 					),
 				},
 				{

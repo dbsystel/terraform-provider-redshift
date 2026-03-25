@@ -235,8 +235,8 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID
 		&tableDelete,
 		&tableDrop,
 		&tableReferences,
-		&tableRule,
-		&tableTrigger); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		&tableTruncate,
+		&tableAlter); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed to collect privileges: %w", err)
 	}
 
@@ -247,8 +247,8 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID
 	appendIfTrue(tableDelete, "delete", &privileges)
 	appendIfTrue(tableDrop, "drop", &privileges)
 	appendIfTrue(tableReferences, "references", &privileges)
-	appendIfTrue(tableRule, "rule", &privileges)
-	appendIfTrue(tableTrigger, "trigger", &privileges)
+	appendIfTrue(tableTruncate, "truncate", &privileges)
+	appendIfTrue(tableAlter, "alter", &privileges)
 
 	log.Printf("[DEBUG] Collected privileges for entity %s %s: %v\n", entityType, entityName, privileges)
 

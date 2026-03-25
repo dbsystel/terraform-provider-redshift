@@ -13,8 +13,7 @@
         "pin",
         "pinDigest"
       ],
-      "automerge": true,
-      "minimumReleaseAge": "7 days"
+      "automerge": true
     }
   ],
   "pinDigests": true,

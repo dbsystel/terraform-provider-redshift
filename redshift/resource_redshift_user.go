@@ -406,16 +406,23 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	var reassignStatements []string
 	for rows.Next() {
 		var statement string
 		if err := rows.Scan(&statement); err != nil {
+			_ = rows.Close()
 			return err
 		}
 
 		reassignStatements = append(reassignStatements, statement)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
 	}
 
 	for _, statement := range reassignStatements {
@@ -429,14 +436,26 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+
+	var schemaNames []string
 
 	for rows.Next() {
 		var schemaName string
 		if err := rows.Scan(&schemaName); err != nil {
+			_ = rows.Close()
 			return err
 		}
+		schemaNames = append(schemaNames, schemaName)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 
+	for _, schemaName := range schemaNames {
 		if _, err := tx.Exec(fmt.Sprintf("REVOKE ALL ON ALL TABLES IN SCHEMA %s FROM %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(userName))); err != nil {
 			return err
 		}

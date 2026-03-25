@@ -52,13 +52,7 @@ func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxCon
 	var err error
 	var password string
 	host := d.Get("host").(string)
-	if host == "" {
-		return nil, fmt.Errorf("host must be specified and non-empty")
-	}
 	username := d.Get("username").(string)
-	if username == "" {
-		return nil, fmt.Errorf("username must be specified and non-empty")
-	}
 	port := d.Get("port").(int)
 	sslMode := d.Get("sslmode").(string)
 	log.Printf("[DEBUG] using username %q for authentication\n", username)
@@ -73,9 +67,6 @@ func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxCon
 	} else {
 		log.Println("[DEBUG] using password authentication")
 		password = d.Get("password").(string)
-		if password == "" {
-			return nil, fmt.Errorf("password must be specified and non-empty when using password authentication")
-		}
 	}
 	return NewPqConfig(host, database, username, password, port, sslMode, maxConnections), nil
 }

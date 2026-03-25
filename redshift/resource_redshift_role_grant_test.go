@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -234,4 +235,16 @@ func checkRoleGrantExists(client *Client, roleGrantId string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func parseRoleGrantId(roleGrantId string) (roleName, grantToType, grantToName string, err error) {
+	// ID format: "role:rolename:type:targetname"
+	parts := strings.Split(roleGrantId, ":")
+	if len(parts) != 4 {
+		return "", "", "", fmt.Errorf("invalid role grant ID format: %s", roleGrantId)
+	}
+	roleName = parts[1]
+	grantToType = strings.ToUpper(parts[2])
+	grantToName = parts[3]
+	return roleName, grantToType, grantToName, nil
 }

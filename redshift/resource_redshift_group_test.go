@@ -13,6 +13,7 @@ import (
 )
 
 func TestAccRedshiftGroup_Basic(t *testing.T) {
+	// todo: use dynamic names for groups
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviders,

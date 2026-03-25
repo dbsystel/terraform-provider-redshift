@@ -144,14 +144,14 @@ func validatePrivileges(privileges []string, objectType string) bool {
 		switch strings.ToUpper(objectType) {
 		case "SCHEMA":
 			switch strings.ToUpper(p) {
-			case "CREATE", "USAGE":
+			case "CREATE", "USAGE", "ALTER", "DROP":
 				continue
 			default:
 				return false
 			}
 		case "TABLE":
 			switch strings.ToUpper(p) {
-			case "SELECT", "UPDATE", "INSERT", "DELETE", "DROP", "REFERENCES", "RULE", "TRIGGER":
+			case "SELECT", "UPDATE", "INSERT", "DELETE", "DROP", "REFERENCES", "ALTER", "TRUNCATE":
 				continue
 			default:
 				return false
@@ -159,7 +159,7 @@ func validatePrivileges(privileges []string, objectType string) bool {
 		case "DATABASE":
 			switch strings.ToUpper(p) {
 			// USAGE is only available from databases created from datashares
-			case "CREATE", "TEMPORARY", "USAGE":
+			case "CREATE", "USAGE", "TEMPORARY", "TEMP", "ALTER":
 				continue
 			default:
 				return false
