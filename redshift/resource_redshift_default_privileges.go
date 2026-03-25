@@ -191,7 +191,7 @@ func resourceRedshiftDefaultPrivilegesReadImpl(db *DBConnection, d *schema.Resou
 }
 
 func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID int) error {
-	var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableRule, tableTrigger bool
+	var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableTruncate, tableAlter bool
 
 	var entityName string
 	var entityType string
@@ -218,8 +218,8 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID
 			COALESCE(MAX(CASE WHEN privilege_type = 'DELETE' THEN 1 ELSE 0 END), 0) AS DELETE,
 			COALESCE(MAX(CASE WHEN privilege_type = 'DROP' THEN 1 ELSE 0 END), 0) AS DROP,
 			COALESCE(MAX(CASE WHEN privilege_type = 'REFERENCES' THEN 1 ELSE 0 END), 0) AS REFERENCES,
-			COALESCE(MAX(CASE WHEN privilege_type = 'RULE' THEN 1 ELSE 0 END), 0) AS RULE,
-			COALESCE(MAX(CASE WHEN privilege_type = 'TRIGGER' THEN 1 ELSE 0 END), 0) AS TRIGGER
+			COALESCE(MAX(CASE WHEN privilege_type = 'TRUNCATE' THEN 1 ELSE 0 END), 0) AS TRUNCATE,
+			COALESCE(MAX(CASE WHEN privilege_type = 'ALTER' THEN 1 ELSE 0 END), 0) AS ALTER
 		FROM svv_default_privileges
 		WHERE object_type = 'RELATION'
 			AND grantee_name = $1
