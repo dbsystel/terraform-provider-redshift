@@ -151,6 +151,8 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		  owner = %[3]q
 		  object_type = "table"
 		  privileges = []
+
+          depends_on = [redshift_default_privileges.group]
 		}
 		`, groupName, userName, rootUsername)
 		resource.Test(t, resource.TestCase{
