@@ -456,8 +456,8 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     COALESCE(MAX(CASE WHEN p.privilege_type = 'DELETE' THEN 1 ELSE 0 END), 0) AS DELETE,
     COALESCE(MAX(CASE WHEN p.privilege_type = 'DROP' THEN 1 ELSE 0 END), 0) AS DROP,
     COALESCE(MAX(CASE WHEN p.privilege_type = 'REFERENCES' THEN 1 ELSE 0 END), 0) AS REFERENCES,
-    COALESCE(MAX(CASE WHEN p.privilege_type = 'RULE' THEN 1 ELSE 0 END), 0) AS rule,
-    COALESCE(MAX(CASE WHEN p.privilege_type = 'TRIGGER' THEN 1 ELSE 0 END), 0) AS TRIGGER
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'TRUNCATE' THEN 1 ELSE 0 END), 0) AS TRUNCATE,
+    COALESCE(MAX(CASE WHEN p.privilege_type = 'ALTER' THEN 1 ELSE 0 END), 0) AS ALTER
   FROM SVV_ALL_TABLES t
   LEFT JOIN svv_relation_privileges p
     ON p.relation_name = t.table_name
