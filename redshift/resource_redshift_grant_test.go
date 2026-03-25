@@ -131,7 +131,7 @@ resource "redshift_grant" "public" {
 	schema = "pg_catalog"
 	object_type = "table"
 	objects = ["pg_user_info"]
-	privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+	privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 }
 `
 	resource.Test(t, resource.TestCase{
@@ -150,13 +150,13 @@ resource "redshift_grant" "public" {
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "objects.*", "pg_user_info"),
 					resource.TestCheckResourceAttr("redshift_grant.public", "privileges.#", "8"),
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "select"),
-					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "update"),
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "insert"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "update"),
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "delete"),
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "drop"),
 					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "references"),
-					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "rule"),
-					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "trigger"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "alter"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.public", "privileges.*", "truncate"),
 				),
 			},
 		},
@@ -324,7 +324,7 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		
 		  object_type = "table"
 		  objects = ["pg_user_info"]
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 		
 		resource "redshift_grant" "grant_user" {
@@ -333,7 +333,7 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		
 		  object_type = "table"
 		  objects = ["pg_user_info"]
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "insert", "update", "delete", "drop", "references", "alter", "truncate"]
 		}
 		`, groupName, userName)
 		resource.Test(t, resource.TestCase{
@@ -352,13 +352,13 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "objects.*", "pg_user_info"),
 						resource.TestCheckResourceAttr("redshift_grant.grant", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "truncate"),
 
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "id", fmt.Sprintf("un:%s_ot:table_pg_catalog_pg_user_info", userName)),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "user", userName),
@@ -368,13 +368,13 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "objects.*", "pg_user_info"),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "privileges.#", "8"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "select"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "insert"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "update"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "delete"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "drop"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "references"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "rule"),
-						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "trigger"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "alter"),
+						resource.TestCheckTypeSetElemAttr("redshift_grant.grant_user", "privileges.*", "truncate"),
 					),
 				},
 			},
