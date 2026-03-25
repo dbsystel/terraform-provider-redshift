@@ -79,12 +79,13 @@ func (c *Config) IsServerless(db *DBConnection) (bool, error) {
 
 	// Insuficcient privileges means we do not have access to this view ergo we run on Redshift classic
 	if isPqErrorWithCode(err, pgErrorCodeInsufficientPrivileges) {
-		_, err := db.Query("SELECT 1 FROM SVL_QUERY_SUMMARY")
+		rows, err = db.Query("SELECT 1 FROM SVL_QUERY_SUMMARY")
 		// An error means we are running Multi-AZ Provisioned Redshift which behaves in some cases as serverless
 		if err != nil {
 			c.isServerless = true
 			return true, nil
 		}
+		_ = rows.Close()
 
 		c.isServerless = false
 		return false, nil
