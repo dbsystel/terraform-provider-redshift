@@ -21,7 +21,9 @@ const (
 	pqErrorCodeInvalidSchemaName = "3F000"
 	pqErrorCodeDeadlock          = "40P01"
 	pqErrorCodeFailedTransaction = "25P02"
-	pqErrorCodeDuplicateSchema   = "42P06"
+	pqErrorDuplicateKeyViolation = "23505"
+
+	pqErrorCodeDuplicateSchema = "42P06"
 
 	pgErrorCodeInsufficientPrivileges = "42501"
 )
@@ -107,6 +109,7 @@ func isRetryablePQError(code string) bool {
 		pqErrorCodeInvalidSchemaName: true,
 		pqErrorCodeDeadlock:          true,
 		pqErrorCodeFailedTransaction: true,
+		pqErrorDuplicateKeyViolation: true,
 	}
 
 	_, ok := retryable[code]
