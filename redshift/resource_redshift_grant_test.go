@@ -591,6 +591,7 @@ func TestAccRedshiftGrant_Regression_GH_Issue_24(t *testing.T) {
 }
 
 func TestAccRedshiftGrant_Regression_Issue_43(t *testing.T) {
+	// todo: use dynamic names for groups/schemas
 	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_grant"), "-", "_")
 
 	config := fmt.Sprintf(`
