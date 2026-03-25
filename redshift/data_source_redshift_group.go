@@ -50,16 +50,24 @@ func dataSourceRedshiftGroupRead(db *DBConnection, d *schema.ResourceData) error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		if err = rows.Err(); err != nil {
+			_ = rows.Close()
 			return fmt.Errorf("could not read group members for group name %q: %w", groupName, err)
 		}
 		var userName string
-		if err := rows.Scan(&userName, &groupId); err != nil {
+		if err = rows.Scan(&userName, &groupId); err != nil {
+			_ = rows.Close()
 			return fmt.Errorf("could not read group members for group name %q: %w", groupName, err)
 		}
 		groupUsers = append(groupUsers, userName)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("could not read group members for group name %q: %w", groupName, err)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("could not close group members rows for group name %q: %w", groupName, err)
 	}
 	if len(groupUsers) == 0 {
 		// no users found so the group id could not be fetched, we have to query for the name

@@ -382,8 +382,8 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     decode(charindex('d',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS DELETE,
     decode(charindex('D',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS DROP,
     decode(charindex('x',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS REFERENCES,
-    decode(charindex('R',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS rule,
-    decode(charindex('t',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS TRIGGER
+    decode(charindex('P',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS TRUNCATE,
+    decode(charindex('A',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'group '||u.usename), u.usename||'=', 2) ,'/',1)),NULL,0,0,0,1) AS ALTER
   FROM pg_user u, pg_class cl
   JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
   WHERE
@@ -402,8 +402,8 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
     decode(charindex('d',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS DELETE,
     decode(charindex('D',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS DROP,
     decode(charindex('x',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS REFERENCES,
-    decode(charindex('R',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS rule,
-    decode(charindex('t',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS TRIGGER
+    decode(charindex('P',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS TRUNCATE,
+    decode(charindex('A',split_part(split_part(replace(array_to_string(relacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), NULL,0, 0,0, 1) AS ALTER
   FROM pg_group gr, pg_class cl
   JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
   WHERE
@@ -429,8 +429,8 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 		  decode(charindex('d',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS DELETE,
 		  decode(charindex('D',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS DROP,
 		  decode(charindex('x',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS REFERENCES,
-		  decode(charindex('R',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS rule,
-		  decode(charindex('t',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS TRIGGER
+		  decode(charindex('P',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS TRUNCATE,
+		  decode(charindex('A',split_part(split_part(regexp_replace(replace(array_to_string(relacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)),NULL,0,0,0,1) AS ALTER
 		FROM pg_class cl
 		JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
 		WHERE
@@ -450,9 +450,9 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	for rows.Next() {
 		var objName string
-		var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableRule, tableTrigger bool
+		var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableTruncate, tableAlter bool
 
-		if err := rows.Scan(&objName, &tableSelect, &tableUpdate, &tableInsert, &tableDelete, &tableDrop, &tableReferences, &tableRule, &tableTrigger); err != nil {
+		if err := rows.Scan(&objName, &tableSelect, &tableUpdate, &tableInsert, &tableDelete, &tableDrop, &tableReferences, &tableTruncate, &tableAlter); err != nil {
 			return err
 		}
 
@@ -479,11 +479,11 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 		if tableReferences {
 			privilegesSet.Add("references")
 		}
-		if tableRule {
-			privilegesSet.Add("rule")
+		if tableTruncate {
+			privilegesSet.Add("truncate")
 		}
-		if tableTrigger {
-			privilegesSet.Add("trigger")
+		if tableAlter {
+			privilegesSet.Add("alter")
 		}
 
 		if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {

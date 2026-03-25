@@ -44,6 +44,7 @@ resource "redshift_user" "with_hashed_password" {
 `
 
 func TestAccRedshiftUser_Login(t *testing.T) {
+	// todo: use dynamic names for users
 	if os.Getenv("REDSHIFT_TEST_ACC_SKIP_USER_LOGIN") != "" {
 		t.Skipf("Skipping user login test as REDSHIFT_TEST_ACC_SKIP_USER_LOGIN is set")
 	}
@@ -115,6 +116,7 @@ resource "redshift_user" "user_timeout" {
 `
 
 func TestAccRedshiftUser_Basic(t *testing.T) {
+	// todo: use dynamic names for users
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviders,
@@ -158,6 +160,7 @@ func TestAccRedshiftUser_Basic(t *testing.T) {
 }
 
 func TestAccRedshiftUser_Update(t *testing.T) {
+	// todo: use dynamic names for users
 
 	var configCreate = `
 resource "redshift_user" "update_user" {
@@ -220,6 +223,7 @@ resource "redshift_user" "update_user" {
 }
 
 func TestAccRedshiftUser_UpdateToSuperuser(t *testing.T) {
+	// todo: use dynamic names for users
 
 	var configCreate = `
 resource "redshift_user" "update_superuser" {
