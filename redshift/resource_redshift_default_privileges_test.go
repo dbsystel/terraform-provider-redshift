@@ -64,7 +64,7 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 		  role = redshift_role.role.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "update", "insert", "delete", "drop", "references", "alter", "truncate"]
 		}
 		`, groupName, userName, rootUsername, roleName)
 		resource.Test(t, resource.TestCase{
@@ -170,7 +170,7 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		  role = redshift_role.role.name
 		  owner = %[3]q
 		  object_type = "table"
-		  privileges = ["select", "update", "insert", "delete", "drop", "references", "rule", "trigger"]
+		  privileges = ["select", "update", "insert", "delete", "drop", "references", "alter", "truncate"]
 		}
 		`, groupName, userName, rootUsername, roleName)
 
