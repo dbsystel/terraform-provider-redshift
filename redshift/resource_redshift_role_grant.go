@@ -27,9 +27,13 @@ This enables role inheritance chains where permissions can be organized hierarch
 
 For more information, see [GRANT documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html).
 `,
-		CreateContext: ResourceFunc(resourceRedshiftRoleGrantCreate),
-		ReadContext:   ResourceFunc(resourceRedshiftRoleGrantRead),
-		DeleteContext: ResourceFunc(resourceRedshiftRoleGrantDelete),
+		CreateContext: ResourceFunc(
+			ResourceRetryOnPQErrors(resourceRedshiftRoleGrantCreate),
+		),
+		ReadContext: ResourceFunc(resourceRedshiftRoleGrantRead),
+		DeleteContext: ResourceFunc(
+			ResourceRetryOnPQErrors(resourceRedshiftRoleGrantDelete),
+		),
 
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
