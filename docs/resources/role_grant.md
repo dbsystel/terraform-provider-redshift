@@ -26,7 +26,7 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 ### Required
 
 - `grant_to_name` (String) The name of the user, or role to grant this role to.
-- `grant_to_type` (String) The type of principal to grant the role to. Valid values are: 'user' or 'role'.
+- `grant_to_type` (String) The type of principal to grant the role to. Valid values are: 'USER' or 'ROLE'.
 - `role_name` (String) The name of the role to grant.
 
 ### Read-Only
