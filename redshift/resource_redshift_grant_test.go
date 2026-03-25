@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	tfschema "github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/lib/pq"
 )
@@ -100,7 +101,7 @@ func TestAccRedshiftGrant_LanguageToPublic(t *testing.T) {
 resource "redshift_grant" "public" {
 	group = "public"
 	object_type = "language"
-	objects = ["plpythonu"]
+	objects = ["plpgsql"]
 	privileges = ["usage"]
 }
 `
@@ -112,7 +113,7 @@ resource "redshift_grant" "public" {
 			{
 				Config: config,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("redshift_grant.public", "id", "gn:public_ot:language_plpythonu"),
+					resource.TestCheckResourceAttr("redshift_grant.public", "id", "gn:public_ot:language_plpgsql"),
 					resource.TestCheckResourceAttr("redshift_grant.public", "group", "public"),
 					resource.TestCheckResourceAttr("redshift_grant.public", "object_type", "language"),
 					resource.TestCheckResourceAttr("redshift_grant.public", "privileges.#", "1"),
@@ -478,7 +479,7 @@ func TestAccRedshiftGrant_BasicLanguage(t *testing.T) {
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user"), "-", "_"),
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user@tf_acc_domain.tld"), "-", "_"),
 	}
-	addedLanguage := "plpythonu"
+	addedLanguage := "sql"
 	secondLanguage := "plpgsql"
 
 	for i, groupName := range groupNames {
@@ -516,13 +517,13 @@ func TestAccRedshiftGrant_BasicLanguage(t *testing.T) {
 				{
 					Config: config,
 					Check: resource.ComposeTestCheckFunc(
-						resource.TestCheckResourceAttr("redshift_grant.grant", "id", fmt.Sprintf("gn:%s_ot:language_%s_%s", groupName, addedLanguage, secondLanguage)),
+						resource.TestCheckResourceAttr("redshift_grant.grant", "id", fmt.Sprintf("gn:%s_ot:language_%s", groupName, testAccRedshiftGrantObjectSetID(addedLanguage, secondLanguage))),
 						resource.TestCheckResourceAttr("redshift_grant.grant", "group", groupName),
 						resource.TestCheckResourceAttr("redshift_grant.grant", "object_type", "language"),
 						resource.TestCheckResourceAttr("redshift_grant.grant", "privileges.#", "1"),
 						resource.TestCheckTypeSetElemAttr("redshift_grant.grant", "privileges.*", "usage"),
 
-						resource.TestCheckResourceAttr("redshift_grant.grant_user", "id", fmt.Sprintf("un:%s_ot:language_%s_%s", userName, addedLanguage, secondLanguage)),
+						resource.TestCheckResourceAttr("redshift_grant.grant_user", "id", fmt.Sprintf("un:%s_ot:language_%s", userName, testAccRedshiftGrantObjectSetID(addedLanguage, secondLanguage))),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "user", userName),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "object_type", "language"),
 						resource.TestCheckResourceAttr("redshift_grant.grant_user", "privileges.#", "1"),
@@ -666,6 +667,21 @@ func testAccRedshiftGrantRegressionIssue43CompareIds(addr1 string, addr2 string)
 	}
 }
 
+func testAccRedshiftGrantObjectSetID(objects ...string) string {
+	setItems := make([]interface{}, len(objects))
+	for i, object := range objects {
+		setItems[i] = object
+	}
+
+	set := tfschema.NewSet(tfschema.HashString, setItems)
+	orderedObjects := make([]string, 0, len(objects))
+	for _, object := range set.List() {
+		orderedObjects = append(orderedObjects, object.(string))
+	}
+
+	return strings.Join(orderedObjects, "_")
+}
+
 func testAccRedshiftGrantBasicCallablesConfigUserGroup(username, group, _ string) string {
 	return fmt.Sprintf(`
 resource "redshift_user" "user" {
@@ -737,10 +753,8 @@ func testAccRedshiftGrantBasicCallablesCreateSchemaAndCallables(_ *testing.T, db
 		returns float
 	stable
 	as $$
-		if a > b:
-			return a
-		return b
-	$$ language plpythonu;
+		select greatest($1, $2)
+	$$ language sql;
 `, schema)
 
 	_, err = db.Exec(function)
@@ -753,10 +767,8 @@ func testAccRedshiftGrantBasicCallablesCreateSchemaAndCallables(_ *testing.T, db
 		returns int
 	stable
 	as $$
-		if a > b:
-			return a
-		return b
-	$$ language plpythonu;
+		select greatest($1, $2)
+	$$ language sql;
 `, schema)
 
 	_, err = db.Exec(function2)
