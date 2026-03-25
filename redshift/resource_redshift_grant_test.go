@@ -210,7 +210,7 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 		resource "redshift_grant" "grant_role" {
 		  role = redshift_role.role.name
 		  object_type = "database"
-		  privileges = ["create", "temporary", "usage]
+		  privileges = ["create", "temporary"]
 		}
 		`, groupName, userName, roleName)
 		resource.Test(t, resource.TestCase{
