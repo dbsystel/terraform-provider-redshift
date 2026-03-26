@@ -128,7 +128,11 @@ Defines access privileges for users and  groups. Privileges include access optio
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 					StateFunc: func(val interface{}) string {
-						return strings.ToLower(val.(string))
+						strVal := strings.ToLower(val.(string))
+						if strVal == "temporary" {
+							strVal = "temp"
+						}
+						return strVal
 					},
 				},
 				Set:         schema.HashString,
@@ -234,157 +238,30 @@ func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) err
 }
 
 func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
-	var entityName, query string
-	var databaseCreate, databaseTemp, databaseUsage bool
-
 	databaseName := getDatabaseName(db, d)
 
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
+	query := `
+SELECT sdp.privilege_type
+FROM svv_database_privileges sdp
+WHERE sdp.database_name = $1
+AND sdp.identity_type = $2
+AND sdp.identity_name = $3;`
 
-	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
-		query = `
-  SELECT
-    decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS CREATE,
-    decode(charindex('T',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS TEMPORARY,
-	decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS USAGE
-  FROM pg_database db, pg_user u
-  WHERE
-    db.datname=$1 
-    AND u.usename=$2
-`
-	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
-		query = `
-  SELECT
-    decode(charindex('C',split_part(split_part(replace(array_to_string(db.datacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)), 0,0,1) AS CREATE,
-    decode(charindex('T',split_part(split_part(replace(array_to_string(db.datacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)), 0,0,1) AS TEMPORARY,
-	decode(charindex('U',split_part(split_part(replace(array_to_string(db.datacl, '|'), '"', ''),'group ' || gr.groname,2 ) ,'/',1)), 0,0,1) AS USAGE
-  FROM pg_database db, pg_group gr
-  WHERE
-    db.datname=$1 
-    AND gr.groname=$2
-`
-	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
-		query = `
-  SELECT
-    COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
-    COALESCE(MAX(CASE WHEN privilege_type = 'TEMP' THEN 1 ELSE 0 END), 0) AS TEMPORARY,
-    COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
-  FROM svv_database_privileges
-  WHERE database_name = $1
-    AND identity_name = $2
-    AND identity_type = 'role'
-`
-	}
-
-	queryArgs := []interface{}{databaseName, entityName}
-
-	// Handle GRANT TO PUBLIC
-	if isGrantToPublic(d) {
-		query = `
-  SELECT
-    decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS CREATE,
-    decode(charindex('T',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS TEMPORARY,
-	decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(db.datacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS USAGE
-  FROM pg_database db
-  WHERE
-    db.datname=$1 
-`
-		queryArgs = []interface{}{databaseName}
-	}
-
-	if err := db.QueryRow(query, queryArgs...).Scan(&databaseCreate, &databaseTemp, &databaseUsage); err != nil {
-		return err
-	}
-
-	var privileges []string
-	appendIfTrue(databaseCreate, "create", &privileges)
-	appendIfTrue(databaseTemp, "temporary", &privileges)
-	appendIfTrue(databaseUsage, "usage", &privileges)
-
-	log.Printf("[DEBUG] Collected database '%s' privileges for %s: %v", databaseName, entityName, privileges)
-
-	d.Set(grantPrivilegesAttr, privileges)
-
-	return nil
+	return readIdentityPrivileges(db, d, "database", databaseName, query)
 }
 
 func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
-	var entityName, query string
-	var schemaCreate, schemaUsage bool
-
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 
-	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
-		query = `
-	SELECT
-		decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS CREATE,
-		decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS USAGE
-	FROM pg_namespace ns, pg_user u
-	WHERE
-		ns.nspname=$1 
-		AND u.usename=$2
-	`
-	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
-		query = `
-  SELECT
-    decode(charindex('C',split_part(split_part(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), 0,0,1) AS CREATE,
-    decode(charindex('U',split_part(split_part(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), 0,0,1) AS USAGE
-  FROM pg_namespace ns, pg_group gr
-  WHERE
-    ns.nspname=$1 
-    AND gr.groname=$2
-`
-	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
-		query = `
-  SELECT
-    COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
-    COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
-  FROM svv_schema_privileges
-  WHERE namespace_name = $1
-    AND identity_name = $2
-    AND identity_type = 'role'
-`
-	}
+	query := `
+SELECT 
+    ssp.privilege_type
+FROM svv_schema_privileges ssp
+WHERE ssp.namespace_name = $1
+AND identity_type = $2
+AND identity_name = $3`
 
-	queryArgs := []interface{}{schemaName, entityName}
-
-	// Handle GRANT TO PUBLIC
-	if isGrantToPublic(d) {
-		query = `
-			SELECT
-				decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS CREATE,
-				decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS USAGE
-			FROM pg_namespace ns
-			WHERE
-				ns.nspname=$1
-			`
-		queryArgs = []interface{}{schemaName}
-	}
-
-	if err := db.QueryRow(query, queryArgs...).Scan(&schemaCreate, &schemaUsage); err != nil {
-		return err
-	}
-
-	var privileges []string
-	appendIfTrue(schemaCreate, "create", &privileges)
-	appendIfTrue(schemaUsage, "usage", &privileges)
-
-	log.Printf("[DEBUG] Collected schema '%s' privileges for %s: %v", schemaName, entityName, privileges)
-
-	d.Set(grantPrivilegesAttr, privileges)
-
-	return nil
+	return readIdentityPrivileges(db, d, "schema", schemaName, query)
 }
 
 func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
@@ -765,6 +642,56 @@ GROUP BY p.language_name
 	log.Printf("[DEBUG] Reading language grants - Done")
 
 	return nil
+}
+
+func readIdentityPrivileges(db *DBConnection, d *schema.ResourceData, objectType, objectName, query string) error {
+	identityType, identityName := getGrantIdentity(d)
+
+	rows, err := db.Query(query, objectName, identityType, identityName)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var privileges []string
+	for rows.Next() {
+		var privilege string
+		if err := rows.Scan(&privilege); err != nil {
+			return err
+		}
+		privileges = append(privileges, strings.ToLower(privilege))
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	log.Printf("[DEBUG] Collected %s %q privileges for %s %q: %v", objectType, objectName, identityType, identityName, privileges)
+
+	d.Set(grantPrivilegesAttr, privileges)
+
+	return nil
+}
+
+func getGrantIdentity(d *schema.ResourceData) (string, string) {
+	if isGrantToPublic(d) {
+		return "public", "public"
+	}
+
+	if userName, isUser := d.GetOk(grantUserAttr); isUser {
+		return "user", userName.(string)
+	}
+
+	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
+		return "group", groupName.(string)
+	}
+
+	if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		return "role", roleName.(string)
+	}
+
+	return "", ""
 }
 
 func revokeGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
