@@ -314,73 +314,58 @@ func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 }
 
 func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
-	var entityName, query string
-	var schemaCreate, schemaUsage bool
-
 	_, isUser := d.GetOk(grantUserAttr)
 	_, isGroup := d.GetOk(grantGroupAttr)
 	_, isRole := d.GetOk(grantRoleAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
 
-	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
-		query = `
-	SELECT
-		decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS CREATE,
-		decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group '||u.usename,'__avoidGroupPrivs__'), u.usename||'=', 2) ,'/',1)), 0,0,1) AS USAGE
-	FROM pg_namespace ns, pg_user u
-	WHERE
-		ns.nspname=$1 
-		AND u.usename=$2
-	`
-	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
-		query = `
-  SELECT
-    decode(charindex('C',split_part(split_part(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), 0,0,1) AS CREATE,
-    decode(charindex('U',split_part(split_part(replace(array_to_string(ns.nspacl, '|'), '"', ''),'group ' || gr.groname || '=',2 ) ,'/',1)), 0,0,1) AS USAGE
-  FROM pg_namespace ns, pg_group gr
-  WHERE
-    ns.nspname=$1 
-    AND gr.groname=$2
-`
-	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
-		query = `
-  SELECT
-    COALESCE(MAX(CASE WHEN privilege_type = 'CREATE' THEN 1 ELSE 0 END), 0) AS CREATE,
-    COALESCE(MAX(CASE WHEN privilege_type = 'USAGE' THEN 1 ELSE 0 END), 0) AS USAGE
-  FROM svv_schema_privileges
-  WHERE namespace_name = $1
-    AND identity_name = $2
-    AND identity_type = 'role'
-`
-	}
+	var identityType, identityName string
 
-	queryArgs := []interface{}{schemaName, entityName}
-
-	// Handle GRANT TO PUBLIC
 	if isGrantToPublic(d) {
-		query = `
-			SELECT
-				decode(charindex('C',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS CREATE,
-				decode(charindex('U',split_part(split_part(regexp_replace(replace(array_to_string(ns.nspacl, '|'), '"', ''),'[^|]+=','__avoidUserPrivs__'), '=', 2) ,'/',1)), 0,0,1) AS USAGE
-			FROM pg_namespace ns
-			WHERE
-				ns.nspname=$1
-			`
-		queryArgs = []interface{}{schemaName}
+		identityType = "public"
+		identityName = "public"
+	} else if isUser {
+		identityType = "user"
+		identityName = d.Get(grantUserAttr).(string)
+	} else if isGroup {
+		identityType = "group"
+		identityName = d.Get(grantGroupAttr).(string)
+	} else if isRole {
+		identityType = "role"
+		identityName = d.Get(grantRoleAttr).(string)
 	}
 
-	if err := db.QueryRow(query, queryArgs...).Scan(&schemaCreate, &schemaUsage); err != nil {
+	query := `
+SELECT 
+    ssp.privilege_type
+FROM svv_schema_privileges ssp
+WHERE ssp.namespace_name = $1
+AND identity_type = $2
+AND identity_name = $3`
+
+	queryArgs := []interface{}{schemaName, identityType, identityName}
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
 		return err
 	}
-
+	defer func() {
+		_ = rows.Close()
+	}()
 	var privileges []string
-	appendIfTrue(schemaCreate, "create", &privileges)
-	appendIfTrue(schemaUsage, "usage", &privileges)
+	for rows.Next() {
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		var privilege string
+		err = rows.Scan(&privilege)
+		if err != nil {
+			return err
+		}
+		privileges = append(privileges, strings.ToLower(privilege))
+	}
 
-	log.Printf("[DEBUG] Collected schema '%s' privileges for %s: %v", schemaName, entityName, privileges)
+	log.Printf("[DEBUG] Collected schema %q privileges for %s %q: %v", schemaName, identityType, identityName, privileges)
 
 	d.Set(grantPrivilegesAttr, privileges)
 
