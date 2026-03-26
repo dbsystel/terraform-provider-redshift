@@ -240,26 +240,6 @@ func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) err
 func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
 	databaseName := getDatabaseName(db, d)
 
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
-
-	var identityType, identityName string
-
-	if isGrantToPublic(d) {
-		identityType = "public"
-		identityName = "public"
-	} else if isUser {
-		identityType = "user"
-		identityName = d.Get(grantUserAttr).(string)
-	} else if isGroup {
-		identityType = "group"
-		identityName = d.Get(grantGroupAttr).(string)
-	} else if isRole {
-		identityType = "role"
-		identityName = d.Get(grantRoleAttr).(string)
-	}
-
 	query := `
 SELECT sdp.privilege_type
 FROM svv_database_privileges sdp
@@ -267,57 +247,11 @@ WHERE sdp.database_name = $1
 AND sdp.identity_type = $2
 AND sdp.identity_name = $3;`
 
-	queryArgs := []interface{}{databaseName, identityType, identityName}
-
-	rows, err := db.Query(query, queryArgs...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	var privileges []string
-
-	for rows.Next() {
-		var privilege string
-		if err = rows.Scan(&privilege); err != nil {
-			return err
-		}
-		privileges = append(privileges, strings.ToLower(privilege))
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-
-	log.Printf("[DEBUG] Collected database %q privileges for %s %q: %v", databaseName, identityType, identityName, privileges)
-
-	d.Set(grantPrivilegesAttr, privileges)
-
-	return nil
+	return readIdentityPrivileges(db, d, "database", databaseName, query)
 }
 
 func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
 	schemaName := d.Get(grantSchemaAttr).(string)
-
-	var identityType, identityName string
-
-	if isGrantToPublic(d) {
-		identityType = "public"
-		identityName = "public"
-	} else if isUser {
-		identityType = "user"
-		identityName = d.Get(grantUserAttr).(string)
-	} else if isGroup {
-		identityType = "group"
-		identityName = d.Get(grantGroupAttr).(string)
-	} else if isRole {
-		identityType = "role"
-		identityName = d.Get(grantRoleAttr).(string)
-	}
 
 	query := `
 SELECT 
@@ -327,33 +261,7 @@ WHERE ssp.namespace_name = $1
 AND identity_type = $2
 AND identity_name = $3`
 
-	queryArgs := []interface{}{schemaName, identityType, identityName}
-
-	rows, err := db.Query(query, queryArgs...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-	var privileges []string
-	for rows.Next() {
-		if err = rows.Err(); err != nil {
-			return err
-		}
-		var privilege string
-		err = rows.Scan(&privilege)
-		if err != nil {
-			return err
-		}
-		privileges = append(privileges, strings.ToLower(privilege))
-	}
-
-	log.Printf("[DEBUG] Collected schema %q privileges for %s %q: %v", schemaName, identityType, identityName, privileges)
-
-	d.Set(grantPrivilegesAttr, privileges)
-
-	return nil
+	return readIdentityPrivileges(db, d, "schema", schemaName, query)
 }
 
 func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
@@ -734,6 +642,56 @@ GROUP BY p.language_name
 	log.Printf("[DEBUG] Reading language grants - Done")
 
 	return nil
+}
+
+func readIdentityPrivileges(db *DBConnection, d *schema.ResourceData, objectType, objectName, query string) error {
+	identityType, identityName := getGrantIdentity(d)
+
+	rows, err := db.Query(query, objectName, identityType, identityName)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var privileges []string
+	for rows.Next() {
+		var privilege string
+		if err := rows.Scan(&privilege); err != nil {
+			return err
+		}
+		privileges = append(privileges, strings.ToLower(privilege))
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	log.Printf("[DEBUG] Collected %s %q privileges for %s %q: %v", objectType, objectName, identityType, identityName, privileges)
+
+	d.Set(grantPrivilegesAttr, privileges)
+
+	return nil
+}
+
+func getGrantIdentity(d *schema.ResourceData) (string, string) {
+	if isGrantToPublic(d) {
+		return "public", "public"
+	}
+
+	if userName, isUser := d.GetOk(grantUserAttr); isUser {
+		return "user", userName.(string)
+	}
+
+	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
+		return "group", groupName.(string)
+	}
+
+	if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		return "role", roleName.(string)
+	}
+
+	return "", ""
 }
 
 func revokeGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
