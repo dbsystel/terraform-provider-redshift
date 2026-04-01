@@ -420,6 +420,11 @@ func resourceRedshiftSchemaReadImpl(db *DBConnection, d *schema.ResourceData) er
 	WHERE svv_all_schemas.database_name = $1
 	AND pg_namespace.oid = $2`, db.client.config.Database, d.Id()).Scan(&schemaName, &schemaOwner, &schemaType)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[WARN] Redshift Schema (%s) not found", d.Id())
+			d.SetId("")
+			return nil
+		}
 		return err
 	}
 	d.Set(schemaNameAttr, schemaName)
