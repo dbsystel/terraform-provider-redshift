@@ -57,11 +57,11 @@ func redshiftDatabase() *schema.Resource {
 				ValidateFunc: validation.IntAtLeast(-1),
 			},
 			databaseDatashareSourceAttr: {
-				Type:         schema.TypeList,
-				Optional:     true,
-				MaxItems:     1,
-				Description:  "Configuration for creating a database from a redshift datashare.",
-				ExactlyOneOf: []string{databaseDatashareSourceAttr, databaseZeroETLIntegrationAttr},
+				Type:          schema.TypeList,
+				Optional:      true,
+				MaxItems:      1,
+				Description:   "Configuration for creating a database from a redshift datashare.",
+				ConflictsWith: []string{databaseZeroETLIntegrationAttr},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						databaseDatashareSourceShareNameAttr: {
@@ -101,11 +101,11 @@ func redshiftDatabase() *schema.Resource {
 				},
 			},
 			databaseZeroETLIntegrationAttr: {
-				Type:         schema.TypeList,
-				Optional:     true,
-				MaxItems:     1,
-				Description:  "Configuration for creating a database from a zero ETL integration.",
-				ExactlyOneOf: []string{databaseDatashareSourceAttr, databaseZeroETLIntegrationAttr},
+				Type:          schema.TypeList,
+				Optional:      true,
+				MaxItems:      1,
+				Description:   "Configuration for creating a database from a zero ETL integration.",
+				ConflictsWith: []string{databaseDatashareSourceAttr},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						databaseZeroETLIntegrationIdAttr: {
