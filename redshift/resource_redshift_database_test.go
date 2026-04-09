@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -94,6 +95,37 @@ resource "redshift_user" "user" {
 			},
 		},
 	})
+}
+
+func TestAccResourceRedshiftDatabase_ZeroETLConflictsWithDatashare(t *testing.T) {
+	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_conflict"), "-", "_")
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccResourceRedshiftDatabaseConfigZeroETLConflict(dbName),
+				ExpectError: regexp.MustCompile(`"zeroetl_integration": conflicts with datashare_source`),
+			},
+		},
+	})
+}
+
+func testAccResourceRedshiftDatabaseConfigZeroETLConflict(dbName string) string {
+	return fmt.Sprintf(`
+resource "redshift_database" "db" {
+  %[1]s = %[2]q
+  %[3]s {
+    %[4]s = "some-share"
+    %[5]s = "00000000-0000-0000-0000-000000000000"
+  }
+  %[6]s {
+    %[7]s = "arn:aws:glue:us-east-1:123456789012:integration/some-integration-id"
+  }
+}
+`, databaseNameAttr, dbName,
+		databaseDatashareSourceAttr, databaseDatashareSourceShareNameAttr, databaseDatashareSourceNamespaceAttr,
+		databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)
 }
 
 func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {
