@@ -77,29 +77,45 @@ func Provider() *schema.Provider {
 			"data_api": {
 				Type:        schema.TypeList,
 				Optional:    true,
-				Description: "Configuration for using the Redshift Data API. This can only be used for serverless Redshift clusters.",
+				Description: "Configuration for using the Redshift Data API. Supports both serverless workgroups and provisioned clusters.",
 				MaxItems:    1,
 				ConflictsWith: []string{
 					"host",
 					"password",
+					"temporary_credentials",
 				},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"workgroup_name": {
 							Type:        schema.TypeString,
-							Required:    true,
+							Optional:    true,
 							Description: "The name of the Redshift Serverless workgroup to connect to.",
 							DefaultFunc: schema.EnvDefaultFunc("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", nil),
-							// https://docs.aws.amazon.com/redshift-serverless/latest/APIReference/API_Workgroup.html#:~:text=Required%3A%20No-,workgroupName,-The%20name%20of
 							ValidateFunc: validation.All(
 								validation.StringLenBetween(3, 64),
 								validation.StringMatch(regexp.MustCompile("[a-z0-9-]+"), "must be lowercase alphanumeric or hyphen characters"),
 							),
+							ExactlyOneOf: []string{"data_api.0.workgroup_name", "data_api.0.cluster_identifier"},
+						},
+						"cluster_identifier": {
+							Type:         schema.TypeString,
+							Optional:     true,
+							Description:  "The identifier of the provisioned Redshift cluster to connect to.",
+							DefaultFunc:  schema.EnvDefaultFunc("REDSHIFT_DATA_API_CLUSTER_IDENTIFIER", nil),
+							ValidateFunc: validation.StringLenBetween(1, 63),
+							ExactlyOneOf: []string{"data_api.0.workgroup_name", "data_api.0.cluster_identifier"},
+						},
+						"username": {
+							Type:         schema.TypeString,
+							Optional:     true,
+							Description:  "The database user to connect as. Required at apply time when cluster_identifier is set.",
+							DefaultFunc:  schema.EnvDefaultFunc("REDSHIFT_DATA_API_USERNAME", nil),
+							ValidateFunc: validation.StringLenBetween(1, 128),
 						},
 						"region": {
 							Type:        schema.TypeString,
 							Required:    true,
-							Description: "The AWS region where the Redshift Serverless workgroup is located. If not specified, the region will be determined from the AWS SDK configuration.",
+							Description: "The AWS region where the Redshift workgroup or cluster is located.",
 							DefaultFunc: schema.MultiEnvDefaultFunc([]string{"AWS_REGION", "AWS_DEFAULT_REGION"}, nil),
 						},
 					},
@@ -194,9 +210,12 @@ func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, 
 func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
 	database := d.Get("database").(string)
 	maxConnections := d.Get("max_connections").(int)
-	_, useDataApi := d.GetOk("data_api.0.workgroup_name")
+	_, useDataApiWorkgroup := d.GetOk("data_api.0.workgroup_name")
+	_, useDataApiCluster := d.GetOk("data_api.0.cluster_identifier")
+	useDataApi := useDataApiWorkgroup || useDataApiCluster
 	_, usePqResourceData := d.GetOk("host")
 
+	// Defence-in-depth: ConflictsWith in the schema already prevents this at plan time.
 	if useDataApi && usePqResourceData {
 		return nil, fmt.Errorf("using both auth methods 'data_api' and 'host' is not allowed")
 	}
