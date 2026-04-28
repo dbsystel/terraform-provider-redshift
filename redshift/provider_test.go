@@ -198,6 +198,44 @@ func Test_getConfigFromResourceData(t *testing.T) {
 			false,
 		},
 		{
+			"Data API cluster config",
+			args{
+				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
+					"database": "some-database",
+					"data_api": []interface{}{
+						map[string]interface{}{
+							"cluster_identifier": "some-cluster",
+							"username":           "some-user",
+							"region":             "us-west-2",
+						},
+					},
+				}),
+			},
+			&Config{
+				DriverName: redshiftDataDriverName,
+				ConnStr:    "some-user@cluster(some-cluster)/some-database?region=us-west-2&transactionMode=non-transactional&requestMode=blocking",
+				Database:   "some-database",
+				MaxConns:   1,
+			},
+			false,
+		},
+		{
+			"Data API cluster config - missing username",
+			args{
+				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
+					"database": "some-database",
+					"data_api": []interface{}{
+						map[string]interface{}{
+							"cluster_identifier": "some-cluster",
+							"region":             "us-west-2",
+						},
+					},
+				}),
+			},
+			nil,
+			true,
+		},
+		{
 			"PQ config",
 			args{
 				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
