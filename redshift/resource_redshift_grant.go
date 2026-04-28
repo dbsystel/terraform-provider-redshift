@@ -339,14 +339,14 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
   LEFT JOIN svv_relation_privileges p
     ON p.relation_name = t.table_name
     AND p.namespace_name = t.schema_name
-    AND p.identity_name = $2
+    AND p.identity_name = $1
     AND p.identity_type = 'role'
-  WHERE t.schema_name = $3
-    and t.database_name = $4
+  WHERE t.schema_name = $2
+    and t.database_name = $3
   GROUP BY t.table_name
 `
 		queryArgs = []interface{}{
-			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName, databaseName,
+			entityName, schemaName, databaseName,
 		}
 	}
 
@@ -487,11 +487,11 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 	WHERE p.namespace_name = $1
 		AND p.identity_name = $2
 		AND p.identity_type = 'role'
-        AND pr.database_name = $4
+        AND pr.database_name = $3
 	GROUP BY p.function_name
 `
 		queryArgs = []interface{}{
-			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]), databaseName,
+			schemaName, entityName, databaseName,
 		}
 	}
 
