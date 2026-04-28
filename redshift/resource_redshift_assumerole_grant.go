@@ -116,7 +116,7 @@ func resourceRedshiftAssumeRoleGrantCreate(db *DBConnection, d *schema.ResourceD
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	d.SetId(generateAssureRoleGrantID(roleName, strings.Join(privileges, ","), grantToType, grantToName))
+	d.SetId(generateAssumeRoleGrantID(roleName, strings.Join(privileges, ","), grantToType, grantToName))
 
 	return resourceRedshiftAssumeRoleGrantRead(db, d)
 }
@@ -218,7 +218,7 @@ func resourceRedshiftAssumeRoleGrantDelete(db *DBConnection, d *schema.ResourceD
 	return nil
 }
 
-func generateAssureRoleGrantID(roleName, privilege, grantToType, grantToName string) string {
+func generateAssumeRoleGrantID(roleName, privilege, grantToType, grantToName string) string {
 	return fmt.Sprintf("role;%s;%s;%s;%s",
 		strings.ToLower(roleName),
 		strings.ToLower(privilege),
