@@ -201,7 +201,7 @@ func resourceRedshiftDatabaseCreateInternal(db *DBConnection, d *schema.Resource
 	// Handle Zero ETL integration source if specified
 	if _, isZeroETLIntegration := d.GetOk(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)); isZeroETLIntegration {
 		integrationId := d.Get(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)).(string)
-		query = fmt.Sprintf("%s FROM INTEGRATION %s", query, pq.QuoteLiteral(integrationId))
+		query = fmt.Sprintf("%s FROM INTEGRATION '%s'", query, pqQuoteLiteral(integrationId))
 	}
 
 	if v, ok := d.GetOk(databaseOwnerAttr); ok {
