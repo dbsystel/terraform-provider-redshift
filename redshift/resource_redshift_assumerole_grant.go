@@ -64,7 +64,7 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 					StateFunc: func(val interface{}) string {
 						return strings.ToLower(val.(string))
 					},
-					ValidateFunc: validation.StringNotInSlice([]string{"all"}, true),
+					ValidateFunc: validation.StringInSlice([]string{"copy", "unload", "external function", "create model"}, true),
 				},
 				Set:         schema.HashString,
 				Description: "The list of privileges to apply. See [GRANT command documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html) to see what privileges are available. 'ALL' cannot be used in this resource.",
