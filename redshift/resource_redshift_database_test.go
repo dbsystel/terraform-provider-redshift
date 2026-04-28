@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -94,6 +96,77 @@ resource "redshift_user" "user" {
 			},
 		},
 	})
+}
+
+func TestAccResourceRedshiftDatabase_ZeroETL(t *testing.T) {
+	integrationId := os.Getenv("REDSHIFT_ZERO_ETL_INTEGRATION_ID")
+	if integrationId == "" {
+		t.Skip("REDSHIFT_ZERO_ETL_INTEGRATION_ID not set, skipping zero ETL acceptance test")
+	}
+	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_zeroetl"), "-", "_")
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccCheckRedshiftDatabaseDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccResourceRedshiftDatabaseConfigZeroETL(dbName, integrationId),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckDatabaseExists(dbName),
+					resource.TestCheckResourceAttr("redshift_database.db", databaseNameAttr, dbName),
+					resource.TestCheckResourceAttr(
+						"redshift_database.db",
+						fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr),
+						integrationId,
+					),
+				),
+			},
+			// ImportState is intentionally omitted: the Redshift catalog does not expose
+			// the integration ID, so imported state cannot be verified.
+		},
+	})
+}
+
+func testAccResourceRedshiftDatabaseConfigZeroETL(dbName, integrationId string) string {
+	return fmt.Sprintf(`
+resource "redshift_database" "db" {
+  %[1]s = %[2]q
+  %[3]s {
+    %[4]s = %[5]q
+  }
+}
+`, databaseNameAttr, dbName, databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr, integrationId)
+}
+
+func TestAccResourceRedshiftDatabase_ZeroETLConflictsWithDatashare(t *testing.T) {
+	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_conflict"), "-", "_")
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccResourceRedshiftDatabaseConfigZeroETLConflict(dbName),
+				ExpectError: regexp.MustCompile(`"zeroetl_integration": conflicts with datashare_source`),
+			},
+		},
+	})
+}
+
+func testAccResourceRedshiftDatabaseConfigZeroETLConflict(dbName string) string {
+	return fmt.Sprintf(`
+resource "redshift_database" "db" {
+  %[1]s = %[2]q
+  %[3]s {
+    %[4]s = "some-share"
+    %[5]s = "00000000-0000-0000-0000-000000000000"
+  }
+  %[6]s {
+    %[7]s = "arn:aws:glue:us-east-1:123456789012:integration/some-integration-id"
+  }
+}
+`, databaseNameAttr, dbName,
+		databaseDatashareSourceAttr, databaseDatashareSourceShareNameAttr, databaseDatashareSourceNamespaceAttr,
+		databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)
 }
 
 func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {

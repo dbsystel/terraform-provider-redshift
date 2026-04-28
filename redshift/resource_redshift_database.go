@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/lib/pq"
@@ -20,6 +21,8 @@ const databaseDatashareSourceShareNameAttr = "share_name"
 const databaseDatashareSourceNamespaceAttr = "namespace"
 const databaseDatashareSourceAccountAttr = "account_id"
 const databaseDatashareSourceWithPermissions = "with_permissions"
+const databaseZeroETLIntegrationAttr = "zeroetl_integration"
+const databaseZeroETLIntegrationIdAttr = "integration_id"
 
 func redshiftDatabase() *schema.Resource {
 	return &schema.Resource{
@@ -31,7 +34,10 @@ func redshiftDatabase() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
-		CustomizeDiff: forceNewIfListSizeChanged(databaseDatashareSourceAttr),
+		CustomizeDiff: customdiff.All(
+			forceNewIfListSizeChanged(databaseDatashareSourceAttr),
+			forceNewIfListSizeChanged(databaseZeroETLIntegrationAttr),
+		),
 		Schema: map[string]*schema.Schema{
 			databaseNameAttr: {
 				Type:        schema.TypeString,
@@ -55,10 +61,11 @@ func redshiftDatabase() *schema.Resource {
 				ValidateFunc: validation.IntAtLeast(-1),
 			},
 			databaseDatashareSourceAttr: {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
-				Description: "Configuration for creating a database from a redshift datashare.",
+				Type:          schema.TypeList,
+				Optional:      true,
+				MaxItems:      1,
+				Description:   "Configuration for creating a database from a redshift datashare.",
+				ConflictsWith: []string{databaseZeroETLIntegrationAttr},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						databaseDatashareSourceShareNameAttr: {
@@ -93,6 +100,23 @@ func redshiftDatabase() *schema.Resource {
 							ForceNew:    true,
 							Description: "Whether the database requires object-level permissions to access individual database objects",
 							Default:     false,
+						},
+					},
+				},
+			},
+			databaseZeroETLIntegrationAttr: {
+				Type:          schema.TypeList,
+				Optional:      true,
+				MaxItems:      1,
+				Description:   "Configuration for creating a database from a zero ETL integration.",
+				ConflictsWith: []string{databaseDatashareSourceAttr},
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						databaseZeroETLIntegrationIdAttr: {
+							Type:        schema.TypeString,
+							Required:    true,
+							ForceNew:    true,
+							Description: "The unique identifier of the zero ETL integration",
 						},
 					},
 				},
@@ -174,6 +198,12 @@ func resourceRedshiftDatabaseCreateInternal(db *DBConnection, d *schema.Resource
 	dbName := d.Get(databaseNameAttr).(string)
 	query := fmt.Sprintf("CREATE DATABASE %s", pq.QuoteIdentifier(dbName))
 
+	// Handle Zero ETL integration source if specified
+	if _, isZeroETLIntegration := d.GetOk(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)); isZeroETLIntegration {
+		integrationId := d.Get(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)).(string)
+		query = fmt.Sprintf("%s FROM INTEGRATION '%s'", query, pqQuoteLiteral(integrationId))
+	}
+
 	if v, ok := d.GetOk(databaseOwnerAttr); ok {
 		query = fmt.Sprintf("%s OWNER %s", query, pq.QuoteIdentifier(v.(string)))
 	}
@@ -246,6 +276,13 @@ WHERE pg_database_info.datid = $1
 		dataShareConfiguration = append(dataShareConfiguration, config)
 	}
 	d.Set(databaseDatashareSourceAttr, dataShareConfiguration)
+
+	// We have no logic to query the cluster to determine if a database is associated
+	// with a zero ETL integration, so we preserve the config value in state.
+	// This won't survive an import, but prevents perpetual diffs during normal lifecycle.
+	if v, ok := d.GetOk(databaseZeroETLIntegrationAttr); ok {
+		d.Set(databaseZeroETLIntegrationAttr, v)
+	}
 
 	return nil
 }

@@ -20,6 +20,7 @@ Due to limited testing capacities, the following features are not tested/stable 
     * RDS Postgres Database
     * RDS MySQL Database
     * Redshift Database
+    * ZeroETL Integration
 * Temporary Credentials Cluster Identifier
 * Temporary Credentials Assume Role
 * Datashares
