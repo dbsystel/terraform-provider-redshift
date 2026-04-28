@@ -1,8 +1,6 @@
 package redshift
 
 import (
-	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -145,11 +143,6 @@ func resourceRedshiftAssumeRoleGrantRead(db *DBConnection, d *schema.ResourceDat
 
 	err := db.QueryRow(query, roleName, grantToName, grantToType).Scan(&copy, &unload, &externalFunction, &createModel)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("[WARN] Assume role grant for %s to %s %s not found", roleName, grantToType, grantToName)
-			d.SetId("")
-			return nil
-		}
 		return fmt.Errorf("failed to collect privileges: %w", err)
 	}
 
@@ -158,6 +151,12 @@ func resourceRedshiftAssumeRoleGrantRead(db *DBConnection, d *schema.ResourceDat
 	appendIfTrue(unload, "unload", &privileges)
 	appendIfTrue(externalFunction, "external function", &privileges)
 	appendIfTrue(createModel, "create model", &privileges)
+
+	if len(privileges) == 0 {
+		log.Printf("[WARN] Assume role grant for %s to %s %s not found, removing from state", roleName, grantToType, grantToName)
+		d.SetId("")
+		return nil
+	}
 
 	d.Set(assumeRoleGrantPrivilegesAttr, privileges)
 
