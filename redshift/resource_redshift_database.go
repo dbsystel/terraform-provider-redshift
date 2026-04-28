@@ -277,6 +277,13 @@ WHERE pg_database_info.datid = $1
 	}
 	d.Set(databaseDatashareSourceAttr, dataShareConfiguration)
 
+	// We have no logic to query the cluster to determine if a database is associated
+	// with a zero ETL integration, so we preserve the config value in state.
+	// This won't survive an import, but prevents perpetual diffs during normal lifecycle.
+	if v, ok := d.GetOk(databaseZeroETLIntegrationAttr); ok {
+		d.Set(databaseZeroETLIntegrationAttr, v)
+	}
+
 	return nil
 }
 
