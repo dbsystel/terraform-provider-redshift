@@ -94,12 +94,12 @@ func resourceRedshiftAssumeRoleGrantCreate(db *DBConnection, d *schema.ResourceD
 	case "USER":
 		query = fmt.Sprintf("%s TO %s",
 			query,
-			grantToName,
+			pq.QuoteIdentifier(grantToName),
 		)
 	case "ROLE":
 		query = fmt.Sprintf("%s TO ROLE %s",
 			query,
-			grantToName,
+			pq.QuoteIdentifier(grantToName),
 		)
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
@@ -184,12 +184,12 @@ func resourceRedshiftAssumeRoleGrantDelete(db *DBConnection, d *schema.ResourceD
 	case "USER":
 		query = fmt.Sprintf("%s FROM %s",
 			query,
-			grantToName,
+			pq.QuoteIdentifier(grantToName),
 		)
 	case "ROLE":
 		query = fmt.Sprintf("%s FROM ROLE %s",
 			query,
-			grantToName,
+			pq.QuoteIdentifier(grantToName),
 		)
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
