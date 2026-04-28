@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/lib/pq"
@@ -33,7 +34,10 @@ func redshiftDatabase() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
-		CustomizeDiff: forceNewIfListSizeChanged(databaseDatashareSourceAttr),
+		CustomizeDiff: customdiff.All(
+			forceNewIfListSizeChanged(databaseDatashareSourceAttr),
+			forceNewIfListSizeChanged(databaseZeroETLIntegrationAttr),
+		),
 		Schema: map[string]*schema.Schema{
 			databaseNameAttr: {
 				Type:        schema.TypeString,
