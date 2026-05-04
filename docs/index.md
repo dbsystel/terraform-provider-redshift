@@ -94,10 +94,13 @@ provider "redshift" {
 <a id="nestedblock--data_api"></a>
 ### Nested Schema for `data_api`
 
+Required:
+
+- `region` (String) The AWS region where the Redshift workgroup or cluster is located.
+
 Optional:
 
 - `cluster_identifier` (String) The identifier of the provisioned Redshift cluster to connect to.
-- `region` (String) The AWS region where the Redshift workgroup or cluster is located.
 - `username` (String) The database user to connect as. Required at apply time when cluster_identifier is set.
 - `workgroup_name` (String) The name of the Redshift Serverless workgroup to connect to.
 
