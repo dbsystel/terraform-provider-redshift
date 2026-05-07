@@ -17,7 +17,7 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 
 ```terraform
 resource "redshift_assumerole_grant" "grant" {
-	role_name     = "arn:aws:iam::123456789012:role/myrole"
+	iam_role      = "arn:aws:iam::123456789012:role/myrole"
 	grant_to_type = "ROLE"
 	grant_to_name = "role1"
 	privileges    = ["copy"]

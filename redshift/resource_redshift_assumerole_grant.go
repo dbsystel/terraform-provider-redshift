@@ -131,7 +131,7 @@ func resourceRedshiftAssumeRoleGrantRead(db *DBConnection, d *schema.ResourceDat
 		SELECT
 			COALESCE(MAX(CASE WHEN command_type = 'COPY' THEN 1 ELSE 0 END), 0),
 			COALESCE(MAX(CASE WHEN command_type = 'UNLOAD' THEN 1 ELSE 0 END), 0),
-			COALESCE(MAX(CASE WHEN command_type = 'EXTERNAL FUNCTION' THEN 1 ELSE 0 END), 0),
+			COALESCE(MAX(CASE WHEN command_type = 'EXFUNC' THEN 1 ELSE 0 END), 0),
 			COALESCE(MAX(CASE WHEN command_type = 'CREATE MODEL' THEN 1 ELSE 0 END), 0)
 		FROM SVV_IAM_PRIVILEGES
 		WHERE iam_arn = $1
