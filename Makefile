@@ -30,8 +30,18 @@ fmt: ## Run gofmt command
 	gofmt -w $(GOFMT_FILES)
 
 .PHONY: doc
-doc: ## Generate documentation files
+doc: schema.json ## Generate documentation files
 	@go generate
+	@rm -f schema.json
+
+.PHONY: schema.json
+schema.json: ## Generate provider schema JSON for doc generation
+	@go build -o /tmp/terraform-provider-redshift
+	@mkdir -p /tmp/redshift-schema-gen
+	@echo 'provider_installation { dev_overrides { "dbsystel/redshift" = "/tmp" } direct {} }' > /tmp/redshift-schema-gen/.terraformrc
+	@printf 'terraform {\n  required_providers {\n    redshift = {\n      source = "dbsystel/redshift"\n    }\n  }\n}\n' > /tmp/redshift-schema-gen/main.tf
+	@TF_CLI_CONFIG_FILE=/tmp/redshift-schema-gen/.terraformrc tofu -chdir=/tmp/redshift-schema-gen providers schema -json | sed 's|registry.opentofu.org/dbsystel/redshift|registry.terraform.io/hashicorp/redshift|g' > schema.json
+	@rm -rf /tmp/redshift-schema-gen /tmp/terraform-provider-redshift
 
 .PHONY: help
 help: ## Show this help message
