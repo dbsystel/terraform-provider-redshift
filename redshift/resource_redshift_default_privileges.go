@@ -210,7 +210,16 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID
 		entityType = "role"
 	}
 
-	query = `
+	queryArgs := []interface{}{entityName, entityType, ownerID}
+	var schemaFilter string
+	if schemaNameSet {
+		schemaFilter = "AND schema_name = $4"
+		queryArgs = append(queryArgs, schemaName)
+	} else {
+		schemaFilter = "AND schema_name IS NULL"
+	}
+
+	query = fmt.Sprintf(`
 		SELECT
 			COALESCE(MAX(CASE WHEN privilege_type = 'SELECT' THEN 1 ELSE 0 END), 0) AS SELECT,
 			COALESCE(MAX(CASE WHEN privilege_type = 'UPDATE' THEN 1 ELSE 0 END), 0) AS UPDATE,
@@ -225,10 +234,10 @@ func readGroupTableDefaultPrivileges(tx *sql.Tx, d *schema.ResourceData, ownerID
 			AND grantee_name = $1
 			AND grantee_type = $2
 			AND owner_id = $3
-			AND (($4::boolean = false AND schema_name IS NULL) OR ($4::boolean = true AND schema_name = $5))
-		`
+			%s
+		`, schemaFilter)
 
-	if err := tx.QueryRow(query, entityName, entityType, ownerID, schemaNameSet, schemaName).Scan(
+	if err := tx.QueryRow(query, queryArgs...).Scan(
 		&tableSelect,
 		&tableUpdate,
 		&tableInsert,
