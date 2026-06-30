@@ -76,9 +76,12 @@ REDSHIFT_HOST=<cluster ip or DNS>
 REDSHIFT_USER=root
 REDSHIFT_PASSWORD=<password>
 
-# Redshift Data API setup
+# Redshift Data API setup (use a serverless workgroup OR a provisioned cluster)
 AWS_REGION=eu-central-1
 REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME=some-workgroup
+# for a provisioned cluster instead of a serverless workgroup:
+REDSHIFT_DATA_API_CLUSTER_IDENTIFIER=some-cluster
+REDSHIFT_DATA_API_USERNAME=root
 REDSHIFT_TEST_ACC_DEBUG_REDSHIFT_DATA=true
 # optional, if the instance is not reachable through TCP/IP using the REDSHIFT_HOST env var
 REDSHIFT_TEST_ACC_SKIP_USER_LOGIN=true

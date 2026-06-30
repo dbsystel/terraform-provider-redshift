@@ -120,6 +120,50 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 	}
 }
 
+// TestAccRedshiftDefaultPrivileges_DataAPIGlobal is a regression test for reading
+// global (schema-less) default privileges over the Redshift Data API. The Data API
+// rejects any query parameter whose value is an empty string, so binding an unset
+// schema as a parameter previously caused the post-create read to fail with a 400
+// ValidationException even though the ALTER DEFAULT PRIVILEGES statement succeeded.
+//
+// It only runs when the provider is configured for the Data API; it is otherwise
+// identical to the schema-less user case in TestAccRedshiftDefaultPrivileges_Basic.
+func TestAccRedshiftDefaultPrivileges_DataAPIGlobal(t *testing.T) {
+	skipUnlessDataAPI(t)
+
+	userName := generateRandomObjectName("tf_acc_user")
+	rootUsername := getRootUsername()
+	config := fmt.Sprintf(`
+resource "redshift_user" "user" {
+  name     = %[1]q
+  password = "TestPassword123"
+}
+
+resource "redshift_default_privileges" "user" {
+  user        = redshift_user.user.name
+  owner       = %[2]q
+  object_type = "table"
+  privileges  = ["select"]
+}
+`, userName, rootUsername)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_default_privileges.user", "id", fmt.Sprintf("un:%s_noschema_on:%s_ot:table", userName, rootUsername)),
+					resource.TestCheckResourceAttr("redshift_default_privileges.user", "object_type", "table"),
+					resource.TestCheckResourceAttr("redshift_default_privileges.user", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_default_privileges.user", "privileges.*", "select"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 	groupNames := []string{
 		strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_group"), "-", "_"),
