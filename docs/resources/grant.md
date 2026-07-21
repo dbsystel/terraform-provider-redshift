@@ -10,6 +10,30 @@ description: |-
 
 Defines access privileges for users and  groups. Privileges include access options such as being able to read data in tables and views, write data, create tables, and drop tables. Use this command to give specific privileges for a table, database, schema, function, procedure, language, or column.
 
+## Grants on all objects in a schema (empty `objects`)
+
+When `objects` is empty, the privileges are granted on **all** objects of the
+given type that exist in the schema at the time of `apply` (for example
+`GRANT SELECT ON ALL TABLES IN SCHEMA`). This grants the privileges once; it
+does not keep applying to objects created later.
+
+What to expect:
+
+- If any object in the schema is missing one of the configured privileges,
+  `plan` shows a diff and `apply` re-applies the grant to every object that
+  currently exists. In a schema where objects are frequently dropped and
+  recreated, this diff may keep reappearing — running `apply` each time brings
+  the existing objects back in line.
+- To keep privileges applied to objects created in the future, use
+  `redshift_default_privileges`. It only covers objects created by the
+  configured owner role, so objects created by other roles still need their own
+  grant.
+- Changing `objects` from an empty list (all objects) to a specific list grants
+  the privileges on the listed objects but does **not** revoke the privileges
+  previously granted on the objects you dropped from scope. Those grants stay in
+  place and are no longer managed by this resource; revoke them manually if you
+  need to.
+
 ## Example Usage
 
 ```terraform
@@ -57,7 +81,7 @@ resource "redshift_grant" "public" {
 
 - `database` (String) The name of the database to grant privileges on. Only used when `object_type` is `database`. By default, the database to which the provider is connected will be used
 - `group` (String) The name of the group to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.
-- `objects` (Set of String) The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type. Ignored when `object_type` is one of (`database`, `schema`).
+- `objects` (Set of String) The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type; see the resource notes on grants on all objects in a schema for what to expect. Ignored when `object_type` is one of (`database`, `schema`).
 - `role` (String) The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.
 - `schema` (String) The database schema to grant privileges on.
 - `user` (String) The name of the user to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.
