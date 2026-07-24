@@ -120,7 +120,7 @@ Defines access privileges for users and  groups. Privileges include access optio
 					},
 				},
 				Set:         schema.HashString,
-				Description: "The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type. Ignored when `object_type` is one of (`database`, `schema`).",
+				Description: "The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type; see the resource notes on grants on all objects in a schema for what to expect. Ignored when `object_type` is one of (`database`, `schema`).",
 			},
 			grantPrivilegesAttr: {
 				Type:     schema.TypeSet,
@@ -276,6 +276,11 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	schemaName := d.Get(grantSchemaAttr).(string)
 	objects := d.Get(grantObjectsAttr).(*schema.Set)
 
+	// The pg_class-based queries below exclude the internal storage tables that
+	// back materialized views (named "mv_tbl__<view>__<n>"). GRANT ... ON ALL
+	// TABLES does not touch those tables, so including them would leave the
+	// intersection permanently missing the granted privilege. The role query
+	// reads from svv_all_tables, which does not surface them.
 	if isUser {
 		entityName = d.Get(grantUserAttr).(string)
 		query = `
@@ -293,6 +298,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
   JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
   WHERE
     cl.relkind = ANY($1)
+    AND cl.relname NOT LIKE 'mv\_tbl\_\_%'
     AND u.usename=$2
     AND nsp.nspname=$3
 `
@@ -316,6 +322,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
   JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
   WHERE
     cl.relkind = ANY($1)
+    AND cl.relname NOT LIKE 'mv\_tbl\_\_%'
     AND gr.groname=$2
     AND nsp.nspname=$3
 `
@@ -366,6 +373,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 		JOIN pg_namespace nsp ON nsp.oid = cl.relnamespace
 		WHERE
 		  cl.relkind = ANY($1)
+		  AND cl.relname NOT LIKE 'mv\_tbl\_\_%'
 		  AND nsp.nspname=$2
 	  `
 		queryArgs = []interface{}{
@@ -379,6 +387,12 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	}
 	defer rows.Close()
 
+	// The query returns one row per in-scope table (all tables in the schema
+	// when objects is empty, otherwise every relation matching relkind). We
+	// aggregate by intersection: a privilege is reported present only if EVERY
+	// relevant table grants it to the grantee. This reflects the invariant an
+	// "ALL TABLES IN SCHEMA" grant maintains and is independent of row order.
+	var privilegesSet *schema.Set
 	for rows.Next() {
 		var objName string
 		var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableTruncate, tableAlter bool
@@ -391,38 +405,51 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 			continue
 		}
 
-		privilegesSet := schema.NewSet(schema.HashString, nil)
+		tablePrivileges := schema.NewSet(schema.HashString, nil)
 		if tableSelect {
-			privilegesSet.Add("select")
+			tablePrivileges.Add("select")
 		}
 		if tableUpdate {
-			privilegesSet.Add("update")
+			tablePrivileges.Add("update")
 		}
 		if tableInsert {
-			privilegesSet.Add("insert")
+			tablePrivileges.Add("insert")
 		}
 		if tableDelete {
-			privilegesSet.Add("delete")
+			tablePrivileges.Add("delete")
 		}
 		if tableDrop {
-			privilegesSet.Add("drop")
+			tablePrivileges.Add("drop")
 		}
 		if tableReferences {
-			privilegesSet.Add("references")
+			tablePrivileges.Add("references")
 		}
 		if tableTruncate {
-			privilegesSet.Add("truncate")
+			tablePrivileges.Add("truncate")
 		}
 		if tableAlter {
-			privilegesSet.Add("alter")
+			tablePrivileges.Add("alter")
 		}
 
-		if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
-			d.Set(grantPrivilegesAttr, privilegesSet)
-			break
+		if privilegesSet == nil {
+			privilegesSet = tablePrivileges
+		} else {
+			privilegesSet = privilegesSet.Intersection(tablePrivileges)
 		}
 
-		log.Printf("[DEBUG] Collected table grants; table: '%v'; privileges: %v; for: %s", objName, privilegesSet.List(), entityName)
+		log.Printf("[DEBUG] Collected table grants; table: '%v'; privileges: %v; for: %s", objName, tablePrivileges.List(), entityName)
+	}
+
+	// No in-scope tables were found (empty schema, or none of the named objects
+	// exist). There is nothing to read back, so leave the configured privileges
+	// in state. Reporting an empty set here would be permanent drift that no
+	// apply could resolve, since there are no tables to grant on.
+	if privilegesSet == nil {
+		return nil
+	}
+
+	if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
+		d.Set(grantPrivilegesAttr, privilegesSet)
 	}
 
 	return nil
@@ -617,6 +644,10 @@ GROUP BY p.language_name
 
 	objects := d.Get(grantObjectsAttr).(*schema.Set)
 
+	// Intersection across all in-scope languages, matching readTableGrants:
+	// report a privilege only if every relevant language grants it, then set
+	// state once after the loop.
+	var privilegesSet *schema.Set
 	for rows.Next() {
 		var objName string
 		var languageUsage bool
@@ -629,15 +660,27 @@ GROUP BY p.language_name
 			continue
 		}
 
-		privilegesSet := schema.NewSet(schema.HashString, nil)
+		languagePrivileges := schema.NewSet(schema.HashString, nil)
 		if languageUsage {
-			privilegesSet.Add("usage")
+			languagePrivileges.Add("usage")
 		}
 
-		if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
-			d.Set(grantPrivilegesAttr, privilegesSet)
-			break
+		if privilegesSet == nil {
+			privilegesSet = languagePrivileges
+		} else {
+			privilegesSet = privilegesSet.Intersection(languagePrivileges)
 		}
+	}
+
+	// No in-scope languages were found: nothing to read back, so leave the
+	// configured privileges in state rather than reporting permanent drift.
+	if privilegesSet == nil {
+		log.Printf("[DEBUG] Reading language grants - Done")
+		return nil
+	}
+
+	if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
+		d.Set(grantPrivilegesAttr, privilegesSet)
 	}
 	log.Printf("[DEBUG] Reading language grants - Done")
 

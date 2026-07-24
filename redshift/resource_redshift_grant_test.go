@@ -922,3 +922,452 @@ func testAccRedshiftGrantBasicCallablesDropResources(_ *testing.T, db *DBConnect
 	}
 	return nil
 }
+
+// The following tests exercise the read path for a "GRANT ... ON ALL TABLES IN
+// SCHEMA" grant (object_type = "table" with an empty objects set). The
+// privileges recorded in state are the intersection across every table in the
+// schema: a privilege is present only if every table grants it to the grantee.
+//
+// Each test creates the grantee as a Terraform resource in the first step (which
+// also configures the provider), then creates the schema and tables out of band
+// from the second step onwards, and drops the schema in CheckDestroy.
+
+// TestAccRedshiftGrant_AllTables_AddRemovePrivileges covers the ordinary
+// lifecycle: granting on all tables, adding a privilege, and removing it again.
+// Each step's follow-up plan must be empty, and the change must reach every
+// table in the schema.
+func TestAccRedshiftGrant_AllTables_AddRemovePrivileges(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_alltables"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_alltables"), "-", "_")
+	grantID := fmt.Sprintf("un:%s_ot:table_%s", userName, schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a", "table_b")
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "id", grantID),
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+			{
+				// Add a privilege: it must be granted on every table.
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select", "update"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "2"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "update"),
+					testAccCheckUserTablePrivilege(schemaName, "table_a", userName, "update", true),
+					testAccCheckUserTablePrivilege(schemaName, "table_b", userName, "update", true),
+				),
+			},
+			{
+				// Remove it again: it must be revoked on every table.
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+					testAccCheckUserTablePrivilege(schemaName, "table_b", userName, "select", true),
+					testAccCheckUserTablePrivilege(schemaName, "table_b", userName, "update", false),
+				),
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGrant_AllTables_ExtraPrivilegeIgnored guards the core
+// regression: an extra privilege on just one table must not leak into state.
+// Because every table still grants the configured privilege, the plan stays
+// empty. A PlanOnly step is required — an apply would REVOKE ALL and mask the
+// difference before the check runs.
+func TestAccRedshiftGrant_AllTables_ExtraPrivilegeIgnored(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_extra"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_extra"), "-", "_")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a", "table_b")
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("GRANT UPDATE ON %s.table_b TO %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(userName)))
+						return err
+					})
+				},
+				Config:   testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGrant_AllTables_UncoveredTableConverges covers the reported
+// symptom: when one table is missing the configured privilege the plan reports
+// drift (deterministically), and applying re-grants across every existing table
+// so a re-run converges.
+func TestAccRedshiftGrant_AllTables_UncoveredTableConverges(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_uncovered"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_uncovered"), "-", "_")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a", "table_b")
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					testAccCheckUserTablePrivilege(schemaName, "table_b", userName, "select", true),
+				),
+			},
+			{
+				// Revoke the privilege on one table out of band: the plan must now
+				// report drift (state reads back as no privileges).
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("REVOKE SELECT ON %s.table_b FROM %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(userName)))
+						return err
+					})
+				},
+				Config:             testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				// Applying re-grants on every existing table, and the follow-up
+				// plan (checked automatically) is empty: the resource converges.
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					testAccCheckUserTablePrivilege(schemaName, "table_b", userName, "select", true),
+				),
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGrant_AllTables_EmptySchema guards against reporting drift when
+// the schema contains no tables. There is nothing to read back, so the
+// configured privileges must be left in state and the follow-up plan must be
+// empty (an empty set would be permanent, unresolvable drift).
+func TestAccRedshiftGrant_AllTables_EmptySchema(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_emptyschema"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_emptyschema"), "-", "_")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName)
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+		},
+	})
+}
+
+func testAccRedshiftGrantUserConfig(user string) string {
+	return fmt.Sprintf(`
+resource "redshift_user" "grantee" {
+  name = %[1]q
+}
+`, user)
+}
+
+func testAccRedshiftGrantAllTablesConfig(user, schemaName string, privileges ...string) string {
+	quoted := make([]string, len(privileges))
+	for i, privilege := range privileges {
+		quoted[i] = fmt.Sprintf("%q", privilege)
+	}
+	return testAccRedshiftGrantUserConfig(user) + fmt.Sprintf(`
+resource "redshift_grant" "all_tables" {
+  user        = redshift_user.grantee.name
+  schema      = %[1]q
+  object_type = "table"
+  objects     = []
+  privileges  = [%[2]s]
+}
+`, schemaName, strings.Join(quoted, ", "))
+}
+
+// withAccGrantConn opens a Redshift connection using the configured test
+// provider and runs fn against it, failing the test on any error.
+func withAccGrantConn(t *testing.T, fn func(db *DBConnection) error) {
+	dbClient := testAccProvider.Meta().(*Client)
+	conn, err := dbClient.Connect()
+	defer dbClient.Close()
+	if err != nil {
+		t.Fatalf("couldn't start redshift connection: %s", err)
+	}
+	if err := fn(conn); err != nil {
+		t.Fatalf("redshift setup/teardown failed: %s", err)
+	}
+}
+
+// testAccCheckUserTablePrivilege asserts whether a user holds a specific
+// privilege on a specific table, read directly from the catalog.
+func testAccCheckUserTablePrivilege(schemaName, table, user, privilege string, want bool) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		dbClient := testAccProvider.Meta().(*Client)
+		conn, err := dbClient.Connect()
+		if err != nil {
+			return fmt.Errorf("couldn't connect to redshift: %w", err)
+		}
+		defer dbClient.Close()
+
+		const query = `
+SELECT COALESCE(MAX(CASE WHEN privilege_type = $1 THEN 1 ELSE 0 END), 0)
+FROM svv_relation_privileges
+WHERE namespace_name = $2 AND relation_name = $3 AND identity_name = $4 AND identity_type = 'user'`
+		var granted int
+		if err := conn.QueryRow(query, strings.ToUpper(privilege), schemaName, table, user).Scan(&granted); err != nil {
+			return fmt.Errorf("couldn't read privileges for %s.%s: %w", schemaName, table, err)
+		}
+		if (granted == 1) != want {
+			return fmt.Errorf("table %s.%s: privilege %q for user %s granted=%v, want %v", schemaName, table, privilege, user, granted == 1, want)
+		}
+		return nil
+	}
+}
+
+// testAccRedshiftGrantDropSchema returns a CheckDestroy that removes the test
+// schema (and its tables) once the Terraform-managed resources are destroyed.
+func testAccRedshiftGrantDropSchema(schemaName string) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		dbClient := testAccProvider.Meta().(*Client)
+		conn, err := dbClient.Connect()
+		if err != nil {
+			return fmt.Errorf("couldn't connect to redshift: %w", err)
+		}
+		defer dbClient.Close()
+		if _, err := conn.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName))); err != nil {
+			return fmt.Errorf("couldn't drop test schema: %w", err)
+		}
+		return nil
+	}
+}
+
+func testAccRedshiftGrantCreateSchemaTables(db *DBConnection, schema string, tables ...string) error {
+	if _, err := db.Exec(fmt.Sprintf("CREATE SCHEMA %s", pq.QuoteIdentifier(schema))); err != nil {
+		return fmt.Errorf("couldn't create schema: %w", err)
+	}
+	for _, table := range tables {
+		stmt := fmt.Sprintf("CREATE TABLE %s.%s (id int)", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(table))
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("couldn't create table %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+// TestAccRedshiftGrant_AllTables_MaterializedView guards convergence when the
+// schema contains a materialized view. The view's internal storage table
+// (mv_tbl__*) is never covered by GRANT ... ON ALL TABLES, so it must be
+// excluded from the read; otherwise the intersection would permanently drop the
+// granted privilege.
+func TestAccRedshiftGrant_AllTables_MaterializedView(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_matview"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_matview"), "-", "_")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaWithMatview(db, schemaName)
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesConfig(userName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGrant_AllTables_Group exercises the group query branch: the
+// grant converges (including with a materialized view present) and an extra
+// privilege on one table is ignored by the intersection.
+func TestAccRedshiftGrant_AllTables_Group(t *testing.T) {
+	groupName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_group_alltables"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_group"), "-", "_")
+	grantID := fmt.Sprintf("gn:%s_ot:table_%s", groupName, schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantGroupConfig(groupName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaWithMatview(db, schemaName)
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesGroupConfig(groupName, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "id", grantID),
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+			{
+				// Extra privilege on one table, out of band: still ignored.
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("GRANT UPDATE ON %s.table_b TO GROUP %s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(groupName)))
+						return err
+					})
+				},
+				Config:   testAccRedshiftGrantAllTablesGroupConfig(groupName, schemaName, "select"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGrant_AllTables_Public exercises the GRANT TO PUBLIC query
+// branch, including convergence with a materialized view present.
+func TestAccRedshiftGrant_AllTables_Public(t *testing.T) {
+	anchorGroup := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_group_anchor"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_public"), "-", "_")
+	grantID := fmt.Sprintf("gn:public_ot:table_%s", schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				// The anchor group only configures the provider so the following
+				// PreConfig can open a connection; the grant itself targets PUBLIC.
+				Config: testAccRedshiftGrantGroupConfig(anchorGroup),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaWithMatview(db, schemaName)
+					})
+				},
+				Config: testAccRedshiftGrantAllTablesPublicConfig(anchorGroup, schemaName, "select"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "id", grantID),
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "privileges.#", "1"),
+					resource.TestCheckTypeSetElemAttr("redshift_grant.all_tables", "privileges.*", "select"),
+				),
+			},
+		},
+	})
+}
+
+func testAccRedshiftGrantGroupConfig(group string) string {
+	return fmt.Sprintf(`
+resource "redshift_group" "grantee" {
+  name = %[1]q
+}
+`, group)
+}
+
+func testAccRedshiftGrantAllTablesGroupConfig(group, schemaName string, privileges ...string) string {
+	return testAccRedshiftGrantGroupConfig(group) + fmt.Sprintf(`
+resource "redshift_grant" "all_tables" {
+  group       = redshift_group.grantee.name
+  schema      = %[1]q
+  object_type = "table"
+  objects     = []
+  privileges  = [%[2]s]
+}
+`, schemaName, quotePrivileges(privileges))
+}
+
+func testAccRedshiftGrantAllTablesPublicConfig(anchorGroup, schemaName string, privileges ...string) string {
+	return testAccRedshiftGrantGroupConfig(anchorGroup) + fmt.Sprintf(`
+resource "redshift_grant" "all_tables" {
+  group       = "public"
+  schema      = %[1]q
+  object_type = "table"
+  objects     = []
+  privileges  = [%[2]s]
+}
+`, schemaName, quotePrivileges(privileges))
+}
+
+func quotePrivileges(privileges []string) string {
+	quoted := make([]string, len(privileges))
+	for i, privilege := range privileges {
+		quoted[i] = fmt.Sprintf("%q", privilege)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+func testAccRedshiftGrantCreateSchemaWithMatview(db *DBConnection, schema string) error {
+	if err := testAccRedshiftGrantCreateSchemaTables(db, schema, "table_a", "table_b"); err != nil {
+		return err
+	}
+	stmt := fmt.Sprintf("CREATE MATERIALIZED VIEW %s.mv_a AS SELECT id FROM %s.table_a", pq.QuoteIdentifier(schema), pq.QuoteIdentifier(schema))
+	if _, err := db.Exec(stmt); err != nil {
+		return fmt.Errorf("couldn't create materialized view: %w", err)
+	}
+	return nil
+}
