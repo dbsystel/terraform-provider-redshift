@@ -222,6 +222,72 @@ resource "redshift_user" "update_user" {
 	})
 }
 
+func TestAccRedshiftUser_SessionParameters(t *testing.T) {
+	// todo: use dynamic names for users
+
+	var configCreate = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+  session_parameters = {
+    query_group = "reporting"
+    search_path = "$user, public"
+  }
+}
+`
+
+	// query_group changed, search_path removed, statement_timeout added.
+	var configUpdate = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+  session_parameters = {
+    query_group       = "other-group"
+    statement_timeout = "60000"
+  }
+}
+`
+
+	// all parameters removed.
+	var configReset = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: configCreate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "2"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.query_group", "reporting"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.search_path", "$user, public"),
+				),
+			},
+			{
+				Config: configUpdate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "2"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.query_group", "other-group"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.statement_timeout", "60000"),
+					resource.TestCheckNoResourceAttr("redshift_user.session_parameters", "session_parameters.search_path"),
+				),
+			},
+			{
+				Config: configReset,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "0"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccRedshiftUser_UpdateToSuperuser(t *testing.T) {
 	// todo: use dynamic names for users
 
