@@ -16,19 +16,25 @@ import (
 )
 
 const (
-	userNameAttr           = "name"
-	userPasswordAttr       = "password"
-	userValidUntilAttr     = "valid_until"
-	userCreateDBAttr       = "create_database"
-	userConnLimitAttr      = "connection_limit"
-	userSyslogAccessAttr   = "syslog_access"
-	userSuperuserAttr      = "superuser"
-	userSessionTimeoutAttr = "session_timeout"
+	userNameAttr              = "name"
+	userPasswordAttr          = "password"
+	userValidUntilAttr        = "valid_until"
+	userCreateDBAttr          = "create_database"
+	userConnLimitAttr         = "connection_limit"
+	userSyslogAccessAttr      = "syslog_access"
+	userSuperuserAttr         = "superuser"
+	userSessionTimeoutAttr    = "session_timeout"
+	userSessionParametersAttr = "session_parameters"
 
 	// defaults
 	defaultUserSyslogAccess          = "RESTRICTED"
 	defaultUserSuperuserSyslogAccess = "UNRESTRICTED"
 )
+
+// Session configuration parameter names are configuration identifiers passed to
+// ALTER USER ... SET, not SQL identifiers, so they can't be quoted with
+// pq.QuoteIdentifier. Restrict them to a conservative character set instead.
+var sessionParameterNameRegexp = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // When authenticating using temporary credentials obtained by GetClusterCredentials,
 // the resulting username is prefixed with either "IAM:"" or "IAMA:"
@@ -134,6 +140,12 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 				Default:      0,
 				Description:  "The maximum time in seconds that a session remains inactive or idle. The range is 60 seconds (one minute) to 1,728,000 seconds (20 days). If no session timeout is set for the user, the cluster setting applies.",
 				ValidateFunc: validation.All(validation.IntAtLeast(60), validation.IntAtMost(1728000)),
+			},
+			userSessionParametersAttr: {
+				Type:        schema.TypeMap,
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. Parameter names may only contain letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
 			},
 		},
 	}
@@ -244,6 +256,10 @@ func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error 
 
 	d.SetId(usesysid)
 
+	if err := setUserSessionParameters(tx, d); err != nil {
+		return err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
@@ -325,7 +341,56 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	d.Set(userValidUntilAttr, userValidUntil)
 	d.Set(userSessionTimeoutAttr, userSessionTimeoutNumber)
 
+	if err := readUserSessionParameters(db, d, useSysID); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// readUserSessionParameters populates session_parameters from pg_user.useconfig,
+// a text[] of "param=value" entries, so that imported or externally-modified
+// users reconcile and drift is detected.
+func readUserSessionParameters(db *DBConnection, d *schema.ResourceData, useSysID string) error {
+	var userConfig []string
+	err := db.QueryRow("SELECT useconfig FROM pg_user WHERE usesysid = $1", useSysID).Scan(pq.Array(&userConfig))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
+		d.SetId("")
+		return nil
+	case err != nil:
+		return fmt.Errorf("error reading user session parameters: %w", err)
+	}
+
+	sessionParameters := make(map[string]string, len(userConfig))
+	for _, entry := range userConfig {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			log.Printf("[WARN] ignoring unparseable useconfig entry %q for user %s", entry, useSysID)
+			continue
+		}
+		sessionParameters[parts[0]] = unquoteUseConfigValue(parts[1])
+	}
+
+	d.Set(userSessionParametersAttr, sessionParameters)
+
+	return nil
+}
+
+// unquoteUseConfigValue reverses the quoting Redshift applies to useconfig
+// values. Values containing characters such as spaces or commas (for example a
+// multi-schema search_path) are stored wrapped in double quotes with any
+// embedded double quotes doubled. Because the provider always writes values via
+// `ALTER USER ... SET <param> = '<value>'`, reversing that serialization lets
+// such values round-trip without a perpetual diff. Values without special
+// characters are stored verbatim and pass through unchanged.
+func unquoteUseConfigValue(value string) string {
+	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, `""`, `"`)
+	}
+	return value
 }
 
 const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
@@ -516,6 +581,10 @@ func resourceRedshiftUserUpdate(db *DBConnection, d *schema.ResourceData) error 
 		return err
 	}
 
+	if err := setUserSessionParameters(tx, d); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
@@ -594,6 +663,48 @@ func setUserSessionTimeout(tx *sql.Tx, d *schema.ResourceData) error {
 	}
 	if _, err := tx.Exec(query); err != nil {
 		return fmt.Errorf("error updating user SESSION TIMEOUT: %w", err)
+	}
+
+	return nil
+}
+
+func setUserSessionParameters(tx *sql.Tx, d *schema.ResourceData) error {
+	if !d.HasChange(userSessionParametersAttr) {
+		return nil
+	}
+
+	userName := d.Get(userNameAttr).(string)
+	oldRaw, newRaw := d.GetChange(userSessionParametersAttr)
+	oldParams := oldRaw.(map[string]interface{})
+	newParams := newRaw.(map[string]interface{})
+
+	// RESET parameters that were removed from the map.
+	for name := range oldParams {
+		if _, ok := newParams[name]; ok {
+			continue
+		}
+		if !sessionParameterNameRegexp.MatchString(name) {
+			return fmt.Errorf("invalid session parameter name %q: only letters, digits and underscores are allowed", name)
+		}
+		query := fmt.Sprintf("ALTER USER %s RESET %s", pq.QuoteIdentifier(userName), name)
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error resetting user session parameter %q: %w", name, err)
+		}
+	}
+
+	// SET parameters that were added or changed.
+	for name, v := range newParams {
+		value := v.(string)
+		if old, ok := oldParams[name]; ok && old.(string) == value {
+			continue
+		}
+		if !sessionParameterNameRegexp.MatchString(name) {
+			return fmt.Errorf("invalid session parameter name %q: only letters, digits and underscores are allowed", name)
+		}
+		query := fmt.Sprintf("ALTER USER %s SET %s = '%s'", pq.QuoteIdentifier(userName), name, pqQuoteLiteral(value))
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error setting user session parameter %q: %w", name, err)
+		}
 	}
 
 	return nil
