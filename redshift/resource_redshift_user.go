@@ -156,7 +156,7 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 				Type:        schema.TypeMap,
 				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
-				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. Parameter names may only contain lowercase letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
+				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. The provider is the exclusive owner of this map: any session parameter set on the user outside of this resource (manually or by another tool) is adopted into state and reset on the next apply. Parameter names may only contain lowercase letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
 			},
 		},
 	}
@@ -327,6 +327,17 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 		return fmt.Errorf("error reading User: %w", err)
 	}
 
+	var userConfig []string
+	err = db.QueryRow("SELECT useconfig FROM pg_user WHERE usesysid = $1", useSysID).Scan(pq.Array(&userConfig))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
+		d.SetId("")
+		return nil
+	case err != nil:
+		return fmt.Errorf("error reading user session parameters: %w", err)
+	}
+
 	userValidUntil, err = validateAndAdjustValidUntil(userValidUntil)
 	if err != nil {
 		return err
@@ -344,6 +355,8 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 		return err
 	}
 
+	sessionParameters := parseUserSessionParameters(userConfig)
+
 	d.Set(userNameAttr, userName)
 	d.Set(userCreateDBAttr, userCreateDB)
 	d.Set(userSuperuserAttr, userSuperuser)
@@ -351,42 +364,29 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	d.Set(userConnLimitAttr, userConnLimitNumber)
 	d.Set(userValidUntilAttr, userValidUntil)
 	d.Set(userSessionTimeoutAttr, userSessionTimeoutNumber)
-
-	if err := readUserSessionParameters(db, d, useSysID); err != nil {
-		return err
-	}
+	d.Set(userSessionParametersAttr, sessionParameters)
 
 	return nil
 }
 
-// readUserSessionParameters populates session_parameters from pg_user.useconfig,
-// a text[] of "param=value" entries, so that imported or externally-modified
-// users reconcile and drift is detected.
-func readUserSessionParameters(db *DBConnection, d *schema.ResourceData, useSysID string) error {
-	var userConfig []string
-	err := db.QueryRow("SELECT useconfig FROM pg_user WHERE usesysid = $1", useSysID).Scan(pq.Array(&userConfig))
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
-		d.SetId("")
-		return nil
-	case err != nil:
-		return fmt.Errorf("error reading user session parameters: %w", err)
-	}
-
+// parseUserSessionParameters parses pg_user.useconfig (a text[] of
+// "param=value" strings) into session_parameters state. The provider is the
+// exclusive owner of a user's session parameters: any parameter present on
+// the user but absent from config is adopted into state and RESET on the
+// next apply, so config remains the single source of truth. Redshift folds
+// parameter names to lowercase, so names are normalized the same way.
+func parseUserSessionParameters(userConfig []string) map[string]string {
 	sessionParameters := make(map[string]string, len(userConfig))
 	for _, entry := range userConfig {
 		parts := strings.SplitN(entry, "=", 2)
 		if len(parts) != 2 {
-			log.Printf("[WARN] ignoring unparseable useconfig entry %q for user %s", entry, useSysID)
+			log.Printf("[WARN] ignoring unparseable useconfig entry %q", entry)
 			continue
 		}
-		sessionParameters[parts[0]] = unquoteUseConfigValue(parts[1])
+		name := strings.ToLower(parts[0])
+		sessionParameters[name] = unquoteUseConfigValue(parts[1])
 	}
-
-	d.Set(userSessionParametersAttr, sessionParameters)
-
-	return nil
+	return sessionParameters
 }
 
 // unquoteUseConfigValue reverses the quoting Redshift applies to useconfig

@@ -19,6 +19,71 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
+func TestUnquoteUseConfigValue(t *testing.T) {
+	tests := map[string]struct {
+		in       string
+		expected string
+	}{
+		"plain value passes through":       {in: "reporting", expected: "reporting"},
+		"quoted value with comma/space":    {in: `"$user, public"`, expected: "$user, public"},
+		"quoted value with embedded quote": {in: `"foo""bar"`, expected: `foo"bar`},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if result := unquoteUseConfigValue(tt.in); result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestParseUserSessionParameters(t *testing.T) {
+	tests := map[string]struct {
+		userConfig []string
+		expected   map[string]string
+	}{
+		"parameter is reconciled": {
+			userConfig: []string{`query_group=reporting`},
+			expected:   map[string]string{"query_group": "reporting"},
+		},
+		"parameter set outside terraform is adopted": {
+			userConfig: []string{`query_group=reporting`, `wlm_query_slot_count=4`},
+			expected:   map[string]string{"query_group": "reporting", "wlm_query_slot_count": "4"},
+		},
+		"name is lowercased": {
+			userConfig: []string{`Search_Path=public`},
+			expected:   map[string]string{"search_path": "public"},
+		},
+		"quoted value is unquoted": {
+			userConfig: []string{`search_path="$user, public"`},
+			expected:   map[string]string{"search_path": "$user, public"},
+		},
+		"unparseable entry is skipped": {
+			userConfig: []string{`not-a-valid-entry`},
+			expected:   map[string]string{},
+		},
+		"empty useconfig yields empty map": {
+			userConfig: []string{},
+			expected:   map[string]string{},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := parseUserSessionParameters(tt.userConfig)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %v, got %v", tt.expected, result)
+			}
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("expected %s=%q, got %s=%q", k, v, k, result[k])
+				}
+			}
+		})
+	}
+}
+
 const testAccRedshiftUserLoginConfig = `
 resource "redshift_user" "with_email" {
   name = "John-and-Jane.doe@example.com"
