@@ -19,6 +19,71 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
+func TestUnquoteUseConfigValue(t *testing.T) {
+	tests := map[string]struct {
+		in       string
+		expected string
+	}{
+		"plain value passes through":       {in: "reporting", expected: "reporting"},
+		"quoted value with comma/space":    {in: `"$user, public"`, expected: "$user, public"},
+		"quoted value with embedded quote": {in: `"foo""bar"`, expected: `foo"bar`},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if result := unquoteUseConfigValue(tt.in); result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestParseUserSessionParameters(t *testing.T) {
+	tests := map[string]struct {
+		userConfig []string
+		expected   map[string]string
+	}{
+		"parameter is reconciled": {
+			userConfig: []string{`query_group=reporting`},
+			expected:   map[string]string{"query_group": "reporting"},
+		},
+		"parameter set outside terraform is adopted": {
+			userConfig: []string{`query_group=reporting`, `wlm_query_slot_count=4`},
+			expected:   map[string]string{"query_group": "reporting", "wlm_query_slot_count": "4"},
+		},
+		"name is lowercased": {
+			userConfig: []string{`Search_Path=public`},
+			expected:   map[string]string{"search_path": "public"},
+		},
+		"quoted value is unquoted": {
+			userConfig: []string{`search_path="$user, public"`},
+			expected:   map[string]string{"search_path": "$user, public"},
+		},
+		"unparseable entry is skipped": {
+			userConfig: []string{`not-a-valid-entry`},
+			expected:   map[string]string{},
+		},
+		"empty useconfig yields empty map": {
+			userConfig: []string{},
+			expected:   map[string]string{},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := parseUserSessionParameters(tt.userConfig)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %v, got %v", tt.expected, result)
+			}
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("expected %s=%q, got %s=%q", k, v, k, result[k])
+				}
+			}
+		})
+	}
+}
+
 const testAccRedshiftUserLoginConfig = `
 resource "redshift_user" "with_email" {
   name = "John-and-Jane.doe@example.com"
@@ -216,6 +281,72 @@ resource "redshift_user" "update_user" {
 					resource.TestCheckResourceAttr("redshift_user.update_user", "valid_until", "2038-01-04 12:00:00+00"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "syslog_access", "RESTRICTED"),
 					resource.TestCheckResourceAttr("redshift_user.update_user", "create_database", "false"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccRedshiftUser_SessionParameters(t *testing.T) {
+	// todo: use dynamic names for users
+
+	var configCreate = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+  session_parameters = {
+    query_group = "reporting"
+    search_path = "$user, public"
+  }
+}
+`
+
+	// query_group changed, search_path removed, statement_timeout added.
+	var configUpdate = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+  session_parameters = {
+    query_group       = "other-group"
+    statement_timeout = "60000"
+  }
+}
+`
+
+	// all parameters removed.
+	var configReset = `
+resource "redshift_user" "session_parameters" {
+  name = "session_parameters_user"
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: configCreate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "2"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.query_group", "reporting"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.search_path", "$user, public"),
+				),
+			},
+			{
+				Config: configUpdate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "2"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.query_group", "other-group"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.statement_timeout", "60000"),
+					resource.TestCheckNoResourceAttr("redshift_user.session_parameters", "session_parameters.search_path"),
+				),
+			},
+			{
+				Config: configReset,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckRedshiftUserExists("session_parameters_user"),
+					resource.TestCheckResourceAttr("redshift_user.session_parameters", "session_parameters.%", "0"),
 				),
 			},
 		},
