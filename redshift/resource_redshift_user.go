@@ -34,7 +34,18 @@ const (
 // Session configuration parameter names are configuration identifiers passed to
 // ALTER USER ... SET, not SQL identifiers, so they can't be quoted with
 // pq.QuoteIdentifier. Restrict them to a conservative character set instead.
-var sessionParameterNameRegexp = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+// Lowercase only: Redshift folds parameter names to lowercase in
+// pg_user.useconfig, so an uppercase name in config would never match what's
+// read back, causing a perpetual diff.
+// See https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html
+var sessionParameterNameRegexp = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+func validateSessionParameterName(name string) error {
+	if !sessionParameterNameRegexp.MatchString(name) {
+		return fmt.Errorf("invalid session parameter name %q: only lowercase letters, digits and underscores are allowed", name)
+	}
+	return nil
+}
 
 // When authenticating using temporary credentials obtained by GetClusterCredentials,
 // the resulting username is prefixed with either "IAM:"" or "IAMA:"
@@ -145,7 +156,7 @@ Amazon Redshift user accounts can only be created and dropped by a database supe
 				Type:        schema.TypeMap,
 				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
-				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. Parameter names may only contain letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
+				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. Parameter names may only contain lowercase letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
 			},
 		},
 	}
@@ -683,8 +694,8 @@ func setUserSessionParameters(tx *sql.Tx, d *schema.ResourceData) error {
 		if _, ok := newParams[name]; ok {
 			continue
 		}
-		if !sessionParameterNameRegexp.MatchString(name) {
-			return fmt.Errorf("invalid session parameter name %q: only letters, digits and underscores are allowed", name)
+		if err := validateSessionParameterName(name); err != nil {
+			return err
 		}
 		query := fmt.Sprintf("ALTER USER %s RESET %s", pq.QuoteIdentifier(userName), name)
 		if _, err := tx.Exec(query); err != nil {
@@ -698,8 +709,8 @@ func setUserSessionParameters(tx *sql.Tx, d *schema.ResourceData) error {
 		if old, ok := oldParams[name]; ok && old.(string) == value {
 			continue
 		}
-		if !sessionParameterNameRegexp.MatchString(name) {
-			return fmt.Errorf("invalid session parameter name %q: only letters, digits and underscores are allowed", name)
+		if err := validateSessionParameterName(name); err != nil {
+			return err
 		}
 		query := fmt.Sprintf("ALTER USER %s SET %s = '%s'", pq.QuoteIdentifier(userName), name, pqQuoteLiteral(value))
 		if _, err := tx.Exec(query); err != nil {
