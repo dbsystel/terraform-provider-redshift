@@ -37,7 +37,17 @@ func TestAccRedshiftSchema_Basic(t *testing.T) {
 
 					testAccCheckRedshiftSchemaExists("wOoOT_I22_@tH15"),
 					resource.TestCheckResourceAttr("redshift_schema.fancy_name", "name", "wooot_i22_@th15"),
+					resource.TestCheckResourceAttr("redshift_schema.fancy_name", "quota", "5120"),
 				),
+			},
+			{
+				// Refreshing must reproduce what was just applied. The quota is read back
+				// by schema name, so a name that Redshift folds, or a quota the read
+				// resolves to 0 because it failed to find its row, shows up here as a
+				// non-empty plan rather than as a passing test.
+				Config:             testAccRedshiftSchemaConfig,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
@@ -631,6 +641,7 @@ resource "redshift_schema" "schema_configured" {
 
 resource "redshift_schema" "fancy_name" {
   name = "wOoOT_I22_@tH15"
+  quota = 5
 }
 
 resource "redshift_user" "schema_test_user1" {

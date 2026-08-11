@@ -17,10 +17,6 @@ type Config struct {
 	Database   string
 	MaxConns   int
 
-	serverlessCheckMutex *sync.Mutex
-	isServerless         bool
-	checkedForServerless bool
-
 	usernameRetrievalMutex *sync.Mutex
 	retrievedUsername      string
 }
@@ -32,7 +28,6 @@ func NewConfig(driverName, connStr, database string, maxConns int) *Config {
 		Database:   database,
 		MaxConns:   maxConns,
 
-		serverlessCheckMutex:   &sync.Mutex{},
 		usernameRetrievalMutex: &sync.Mutex{},
 	}
 }
@@ -55,43 +50,6 @@ func (c *Config) NewClient() *Client {
 	return &Client{
 		config: *c,
 	}
-}
-
-func (c *Config) IsServerless(db *DBConnection) (bool, error) {
-	if c.serverlessCheckMutex == nil {
-		c.serverlessCheckMutex = &sync.Mutex{}
-	}
-	c.serverlessCheckMutex.Lock()
-	defer c.serverlessCheckMutex.Unlock()
-	if c.checkedForServerless {
-		return c.isServerless, nil
-	}
-
-	c.checkedForServerless = true
-
-	rows, err := db.Query("SELECT 1 FROM SYS_SERVERLESS_USAGE")
-	// No error means we have accessed the view and are running Redshift Serverless
-	if err == nil {
-		defer rows.Close()
-		c.isServerless = true
-		return true, nil
-	}
-
-	// Insuficcient privileges means we do not have access to this view ergo we run on Redshift classic
-	if isPqErrorWithCode(err, pgErrorCodeInsufficientPrivileges) {
-		rows, err = db.Query("SELECT 1 FROM SVL_QUERY_SUMMARY")
-		// An error means we are running Multi-AZ Provisioned Redshift which behaves in some cases as serverless
-		if err != nil {
-			c.isServerless = true
-			return true, nil
-		}
-		_ = rows.Close()
-
-		c.isServerless = false
-		return false, nil
-	}
-
-	return false, err
 }
 
 func (c *Config) GetUsername(db *DBConnection) (string, error) {
