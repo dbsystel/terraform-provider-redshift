@@ -81,12 +81,14 @@ provider "redshift" {
 
 ### Optional
 
+- `connect_timeout` (Number) Maximum wait for a connection to be established, in seconds. This covers the TCP connection, TLS negotiation and authentication handshake, but not the execution of individual statements. Zero applies no timeout, leaving the operating system to give up on the TCP connection in its own time. Unused when connecting via the Data API.
 - `data_api` (Block List, Max: 1) Configuration for using the Redshift Data API. Supports both serverless workgroups and provisioned clusters. (see [below for nested schema](#nestedblock--data_api))
 - `database` (String) The name of the database to connect to. The default is `redshift`.
 - `host` (String) Name of Redshift server address to connect to.
 - `max_connections` (Number) Maximum number of connections to establish to the database. Zero means unlimited.
 - `password` (String, Sensitive) Password to be used if the Redshift server demands password authentication.
 - `port` (Number) The Redshift port number to connect to at the server host.
+- `session_parameters` (Map of String) A map of session configuration parameters to apply to every connection the provider opens, sent using the libpq `options` connection parameter. Values are passed to Redshift unaltered and so use its own units. This map replaces the `PGOPTIONS` environment variable rather than merging with it. Parameter names may only contain lowercase letters, digits and underscores, and values only letters, digits and the characters `_.,:/@+-`. Cannot be combined with `data_api`, which opens a new session for each statement. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.
 - `sslmode` (String) This option determines whether or with what priority a secure SSL TCP/IP connection will be negotiated with the Redshift server. Valid values are `require` (default, always SSL, also skip verification), `verify-ca` (always SSL, verify that the certificate presented by the server was signed by a trusted CA), `verify-full` (always SSL, verify that the certification presented by the server was signed by a trusted CA and the server host name matches the one in the certificate), `disable` (no SSL).
 - `temporary_credentials` (Block List, Max: 1) Configuration for obtaining a temporary password using redshift:GetClusterCredentials (see [below for nested schema](#nestedblock--temporary_credentials))
 - `username` (String) Redshift user name to connect as.
@@ -131,6 +133,78 @@ Optional:
 
 - `external_id` (String) A unique identifier that might be required when you assume a role in another account.
 - `session_name` (String) An identifier for the assumed role session.
+
+## Connection Tuning
+
+```terraform
+provider "redshift" {
+  host     = var.redshift_host
+  username = var.redshift_user
+  password = var.redshift_password
+
+  # Report an error quickly when the cluster is unreachable, rather than waiting
+  # the default 180 seconds.
+  connect_timeout = 5
+
+  session_parameters = {
+    # Cancel any statement running for longer than five minutes. Redshift expresses
+    # this in milliseconds.
+    statement_timeout = "300000"
+
+    # Run provider statements in the reserved superuser queue so that they are not
+    # held up behind operational queries.
+    query_group = "superuser"
+  }
+}
+```
+
+### Connection timeouts
+
+`connect_timeout` defaults to 180 seconds, so a cluster the provider cannot reach — a
+closed security group, a disconnected VPN, a paused cluster — stalls Terraform for
+minutes before reporting an error. Connection attempts do not overlap, so a run waits for
+roughly this timeout multiplied by the number of resources Terraform has in flight. With
+the default `-parallelism=10`, `connect_timeout = 5` keeps that under a minute.
+
+When it is not set the provider reads `PGCONNECT_TIMEOUT`, so you can shorten it for a
+single run without editing your configuration; values that are not a non-negative integer
+are ignored.
+
+### Session parameters
+
+Useful parameters include:
+
+* [`statement_timeout`](https://docs.aws.amazon.com/redshift/latest/dg/r_statement_timeout.html)
+  stops any statement running longer than the given number of **milliseconds**. On Redshift
+  this budget covers planning, queueing in workload management and execution, not just
+  execution time.
+* [`query_group`](https://docs.aws.amazon.com/redshift/latest/dg/r_query_group.html) routes
+  statements to a particular workload management queue — see
+  [Query groups and the superuser queue](#query-groups-and-the-superuser-queue) below.
+
+Because these are sent using the libpq `options` connection parameter, setting
+`session_parameters` causes the `PGOPTIONS` environment variable to be ignored in its
+entirety. The provider emits a warning when both are present.
+
+### Query groups and the superuser queue
+
+Redshift routes queries to workload management queues. The statements this provider runs
+are control plane work — creating users, granting privileges, managing schemas — and are
+generally quick, but by default they share a queue with your operational queries and can
+end up waiting behind long-running ones. Setting
+[`query_group`](https://docs.aws.amazon.com/redshift/latest/dg/r_query_group.html) routes
+them somewhere else.
+
+Redshift reserves a superuser queue that sits outside your configured WLM queues, so
+provider statements sent to it are not held up by operational queries. Reaching it
+requires connecting as a superuser; for anyone else the setting has no effect on routing.
+It is the first of the
+[WLM queue assignment rules](https://docs.aws.amazon.com/redshift/latest/dg/cm-c-wlm-queue-assignment-rules.html),
+whose example configuration also shows it having a concurrency of 1. That single query
+slot means provider statements sent there run one at a time.
+
+You can also point `query_group` at a queue defined in your own WLM configuration, which
+is worth doing if you want to give provider statements dedicated concurrency and memory.
 
 ## Proxy Support
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
@@ -15,6 +17,7 @@ import (
 const (
 	defaultProviderMaxOpenConnections                      = 20
 	defaultTemporaryCredentialsAssumeRoleDurationInSeconds = 900
+	defaultConnectTimeoutInSeconds                         = 180
 )
 
 func Provider() *schema.Provider {
@@ -74,6 +77,25 @@ func Provider() *schema.Provider {
 				Description:  "Maximum number of connections to establish to the database. Zero means unlimited.",
 				ValidateFunc: validation.IntAtLeast(-1),
 			},
+			// connect_timeout deliberately declares no ConflictsWith. Its DefaultFunc always
+			// returns a value, which the SDK treats as the argument being set, so a conflict
+			// would fire for every data_api user. Like port and sslmode, it is simply unused
+			// by the Data API transport.
+			"connect_timeout": {
+				Type:         schema.TypeInt,
+				Optional:     true,
+				DefaultFunc:  connectTimeoutDefault,
+				Description:  "Maximum wait for a connection to be established, in seconds. This covers the TCP connection, TLS negotiation and authentication handshake, but not the execution of individual statements. Zero applies no timeout, leaving the operating system to give up on the TCP connection in its own time. Unused when connecting via the Data API.",
+				ValidateFunc: validation.IntAtLeast(0),
+			},
+			"session_parameters": {
+				Type:             schema.TypeMap,
+				Optional:         true,
+				Elem:             &schema.Schema{Type: schema.TypeString},
+				Description:      "A map of session configuration parameters to apply to every connection the provider opens, sent using the libpq `options` connection parameter. Values are passed to Redshift unaltered and so use its own units. This map replaces the `PGOPTIONS` environment variable rather than merging with it. Parameter names may only contain lowercase letters, digits and underscores, and values only letters, digits and the characters `_.,:/@+-`. Cannot be combined with `data_api`, which opens a new session for each statement. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
+				ConflictsWith:    []string{"data_api"},
+				ValidateDiagFunc: validateSessionParameters,
+			},
 			"data_api": {
 				Type:        schema.TypeList,
 				Optional:    true,
@@ -83,6 +105,7 @@ func Provider() *schema.Provider {
 					"host",
 					"password",
 					"temporary_credentials",
+					"session_parameters",
 				},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -196,16 +219,56 @@ func Provider() *schema.Provider {
 	}
 }
 
+// connectTimeoutDefault resolves the default from PGCONNECT_TIMEOUT, the variable libpq
+// itself reads. A value that is not a non-negative integer falls back to the built-in
+// default rather than failing: the argument is also present for Data API configurations,
+// which never open a libpq connection and must not be broken by an unrelated variable in
+// the environment. lib/pq reports the bad value, naming the variable, if a libpq
+// connection is actually made.
+func connectTimeoutDefault() (interface{}, error) {
+	raw := os.Getenv("PGCONNECT_TIMEOUT")
+	if raw == "" {
+		return defaultConnectTimeoutInSeconds, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		log.Printf("[WARN] ignoring PGCONNECT_TIMEOUT value %q: not a non-negative integer", raw)
+		return defaultConnectTimeoutInSeconds, nil
+	}
+	return seconds, nil
+}
+
 func providerConfigure(_ context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	cfg, err := getConfigFromResourceData(d, temporaryCredentials)
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
 
+	diags := warnOnShadowedPGOptions(d)
+
 	log.Println("[DEBUG] creating database client")
 	client := cfg.NewClient()
 	log.Println("[DEBUG] created database client")
-	return client, nil
+	return client, diags
+}
+
+// warnOnShadowedPGOptions reports that PGOPTIONS is being discarded. Session parameters
+// are sent as the libpq `options` connection parameter, which takes precedence over the
+// environment variable of the same meaning, so a user setting both silently loses the
+// settings from their environment.
+func warnOnShadowedPGOptions(d *schema.ResourceData) diag.Diagnostics {
+	sessionParameters, ok := d.GetOk("session_parameters")
+	if !ok || len(sessionParameters.(map[string]interface{})) == 0 {
+		return nil
+	}
+	if os.Getenv("PGOPTIONS") == "" {
+		return nil
+	}
+	return diag.Diagnostics{{
+		Severity: diag.Warning,
+		Summary:  "PGOPTIONS is ignored",
+		Detail:   "The provider's `session_parameters` argument is set, which overrides the PGOPTIONS environment variable in its entirety. Move any settings you still need from PGOPTIONS into `session_parameters`.",
+	}}
 }
 
 func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
