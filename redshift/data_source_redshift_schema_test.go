@@ -22,7 +22,11 @@ func TestAccDataSourceRedshiftSchema_basic(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("data.redshift_schema.schema", schemaNameAttr, schemaName),
 					resource.TestCheckResourceAttrSet("data.redshift_schema.schema", schemaOwnerAttr),
-					resource.TestCheckResourceAttrSet("data.redshift_schema.schema", schemaQuotaAttr),
+					// The quota is asserted by value, not merely as set: the data source
+					// looks the quota up by schema name rather than by oid, and it is the
+					// only caller whose name comes from configuration instead of from the
+					// database, so a lookup that silently finds nothing must fail here.
+					resource.TestCheckResourceAttr("data.redshift_schema.schema", schemaQuotaAttr, "15360"),
 				),
 			},
 		},
@@ -33,12 +37,13 @@ func testAccDataSourceRedshiftSchemaConfigBasic(schemaName string) string {
 	return fmt.Sprintf(`
 resource "redshift_schema" "schema" {
 	%[1]s = %[2]q
+	%[3]s = 15
 }
 
 data "redshift_schema" "schema" {
 	%[1]s = redshift_schema.schema.%[1]s
 }
-`, schemaNameAttr, schemaName)
+`, schemaNameAttr, schemaName, schemaQuotaAttr)
 }
 
 // Acceptance test for external redshift schema using AWS Glue Data Catalog
