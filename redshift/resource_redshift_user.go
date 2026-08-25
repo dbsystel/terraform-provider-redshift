@@ -10,8 +10,19 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
@@ -58,231 +69,275 @@ func permanentUsername(username string) string {
 	return temporaryCredentialsUsernamePrefixRegexp.ReplaceAllString(username, "")
 }
 
-func redshiftUser() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ resource.Resource                   = &userResource{}
+	_ resource.ResourceWithConfigure      = &userResource{}
+	_ resource.ResourceWithImportState    = &userResource{}
+	_ resource.ResourceWithValidateConfig = &userResource{}
+)
+
+func newUserResource() resource.Resource {
+	return &userResource{}
+}
+
+type userResource struct {
+	frameworkClient
+}
+
+type userResourceModel struct {
+	ID                types.String `tfsdk:"id"`
+	Name              types.String `tfsdk:"name"`
+	Password          types.String `tfsdk:"password"`
+	ValidUntil        types.String `tfsdk:"valid_until"`
+	CreateDatabase    types.Bool   `tfsdk:"create_database"`
+	ConnectionLimit   types.Int64  `tfsdk:"connection_limit"`
+	SyslogAccess      types.String `tfsdk:"syslog_access"`
+	Superuser         types.Bool   `tfsdk:"superuser"`
+	SessionTimeout    types.Int64  `tfsdk:"session_timeout"`
+	SessionParameters types.Map    `tfsdk:"session_parameters"`
+}
+
+func (r *userResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_user"
+}
+
+func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: `
 Amazon Redshift user accounts can only be created and dropped by a database superuser. Users are authenticated when they login to Amazon Redshift. They can own databases and database objects (for example, tables) and can grant privileges on those objects to users, groups, and schemas to control who has access to which object. Users with CREATE DATABASE rights can create databases and grant privileges to those databases. Superusers have database ownership privileges for all databases.
 `,
-		CreateContext: ResourceFunc(resourceRedshiftUserCreate),
-		ReadContext:   ResourceFunc(resourceRedshiftUserRead),
-		UpdateContext: ResourceFunc(resourceRedshiftUserUpdate),
-		DeleteContext: ResourceFunc(
-			ResourceRetryOnPQErrors(resourceRedshiftUserDelete),
-		),
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
-		CustomizeDiff: func(_ context.Context, d *schema.ResourceDiff, p interface{}) error {
-			isSuperuser := d.Get(userSuperuserAttr).(bool)
-
-			isPasswordKnown := d.NewValueKnown(userPasswordAttr)
-			password, hasPassword := d.GetOk(userPasswordAttr)
-			if isSuperuser && isPasswordKnown && (!hasPassword || password.(string) == "") {
-				return fmt.Errorf("users that are superusers must define a password")
-			}
-
-			isSyslogAccessKnown := d.NewValueKnown(userSyslogAccessAttr)
-			syslogAccess, hasSyslogAccess := d.GetOk(userSyslogAccessAttr)
-			if isSuperuser && isSyslogAccessKnown && hasSyslogAccess && syslogAccess != defaultUserSuperuserSyslogAccess {
-				return fmt.Errorf("superusers must have syslog access set to %q", defaultUserSuperuserSyslogAccess)
-			}
-
-			return nil
-		},
-
-		Schema: map[string]*schema.Schema{
-			userNameAttr: {
-				Type:        schema.TypeString,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The user ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			userNameAttr: schema.StringAttribute{
 				Required:    true,
 				Description: "The name of the user account to create. The user name can't be `PUBLIC`.",
-				ValidateFunc: validation.StringNotInSlice([]string{
-					"public",
-				}, true),
+				Validators: []validator.String{
+					stringvalidator.NoneOfCaseInsensitive("public"),
+				},
 			},
-			userPasswordAttr: {
-				Type:        schema.TypeString,
+			userPasswordAttr: schema.StringAttribute{
 				Optional:    true,
 				Sensitive:   true,
 				Description: "Sets the user's password. Users can change their own passwords, unless the password is disabled. To disable password, omit this parameter or set it to `null`. Can also be a hashed password rather than the plaintext password. Please refer to the Redshift [CREATE USER documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_USER.html) for information on creating a password hash.",
 			},
-			userValidUntilAttr: {
-				Type:        schema.TypeString,
+			userValidUntilAttr: schema.StringAttribute{
 				Optional:    true,
-				Default:     "infinity",
+				Computed:    true,
+				Default:     stringdefault.StaticString("infinity"),
 				Description: "Sets a date and time after which the user's password is no longer valid. By default the password has no time limit.",
 			},
-			userCreateDBAttr: {
-				Type:        schema.TypeBool,
+			userCreateDBAttr: schema.BoolAttribute{
 				Optional:    true,
-				Default:     false,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				Description: "Allows the user to create new databases. By default user can't create new databases.",
 			},
-			userConnLimitAttr: {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Default:      -1,
-				Description:  "The maximum number of database connections the user is permitted to have open concurrently. The limit isn't enforced for superusers.",
-				ValidateFunc: validation.IntAtLeast(-1),
-			},
-			userSyslogAccessAttr: {
-				Type:        schema.TypeString,
+			userConnLimitAttr: schema.Int64Attribute{
 				Optional:    true,
-				Description: "A clause that specifies the level of access that the user has to the Amazon Redshift system tables and views. If `RESTRICTED` (default) is specified, the user can see only the rows generated by that user in user-visible system tables and views. If `UNRESTRICTED` is specified, the user can see all rows in user-visible system tables and views, including rows generated by another user. `UNRESTRICTED` doesn't give a regular user access to superuser-visible tables. Only superusers can see superuser-visible tables.",
-				ValidateFunc: validation.StringInSlice([]string{
-					"RESTRICTED",
-					"UNRESTRICTED",
-				}, false),
-				DiffSuppressFunc: func(k, oldValue, newValue string, d *schema.ResourceData) bool {
-					if newValue == "" && oldValue == getDefaultSyslogAccess(d) {
-						return true
-					}
-					return false
+				Computed:    true,
+				Default:     int64default.StaticInt64(-1),
+				Description: "The maximum number of database connections the user is permitted to have open concurrently. The limit isn't enforced for superusers.",
+				Validators: []validator.Int64{
+					int64validator.AtLeast(-1),
 				},
 			},
-			userSuperuserAttr: {
-				Type:        schema.TypeBool,
+			userSyslogAccessAttr: schema.StringAttribute{
+				Optional: true,
+				// Computed, so that leaving the argument out keeps whichever default the
+				// cluster applied instead of planning a change. That is what the SDK
+				// resource used a DiffSuppressFunc for.
+				Computed:    true,
+				Description: "A clause that specifies the level of access that the user has to the Amazon Redshift system tables and views. If `RESTRICTED` (default) is specified, the user can see only the rows generated by that user in user-visible system tables and views. If `UNRESTRICTED` is specified, the user can see all rows in user-visible system tables and views, including rows generated by another user. `UNRESTRICTED` doesn't give a regular user access to superuser-visible tables. Only superusers can see superuser-visible tables.",
+				Validators: []validator.String{
+					stringvalidator.OneOf("RESTRICTED", "UNRESTRICTED"),
+				},
+			},
+			userSuperuserAttr: schema.BoolAttribute{
 				Optional:    true,
-				Default:     false,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				Description: `Determine whether the user is a superuser with all database privileges.`,
 			},
-			userSessionTimeoutAttr: {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Default:      0,
-				Description:  "The maximum time in seconds that a session remains inactive or idle. The range is 60 seconds (one minute) to 1,728,000 seconds (20 days). If no session timeout is set for the user, the cluster setting applies.",
-				ValidateFunc: validation.All(validation.IntAtLeast(60), validation.IntAtMost(1728000)),
-			},
-			userSessionParametersAttr: {
-				Type:        schema.TypeMap,
+			userSessionTimeoutAttr: schema.Int64Attribute{
 				Optional:    true,
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
+				Description: "The maximum time in seconds that a session remains inactive or idle. The range is 60 seconds (one minute) to 1,728,000 seconds (20 days). If no session timeout is set for the user, the cluster setting applies.",
+				Validators: []validator.Int64{
+					int64validator.Between(60, 1728000),
+				},
+			},
+			userSessionParametersAttr: schema.MapAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
 				Description: "A map of session configuration parameters to apply as per-user defaults via `ALTER USER ... SET <param> = <value>` (for example `query_group` or `search_path`). Removing a key issues `ALTER USER ... RESET <param>`. The provider is the exclusive owner of this map: any session parameter set on the user outside of this resource (manually or by another tool) is adopted into state and reset on the next apply. Parameter names may only contain lowercase letters, digits and underscores. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.",
 			},
 		},
 	}
 }
 
-func resourceRedshiftUserCreate(db *DBConnection, d *schema.ResourceData) error {
+func (r *userResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
+}
+
+func (r *userResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// ValidateConfig enforces the two rules the SDK resource expressed as a CustomizeDiff.
+func (r *userResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var model userResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if model.Superuser.IsUnknown() || !model.Superuser.ValueBool() {
+		return
+	}
+
+	if !model.Password.IsUnknown() && (model.Password.IsNull() || model.Password.ValueString() == "") {
+		resp.Diagnostics.AddAttributeError(path.Root(userPasswordAttr), "Invalid user", "users that are superusers must define a password")
+	}
+
+	if !model.SyslogAccess.IsUnknown() && !model.SyslogAccess.IsNull() && model.SyslogAccess.ValueString() != defaultUserSuperuserSyslogAccess {
+		resp.Diagnostics.AddAttributeError(path.Root(userSyslogAccessAttr), "Invalid user", fmt.Sprintf("superusers must have syslog access set to %q", defaultUserSuperuserSyslogAccess))
+	}
+}
+
+func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model userResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	// syslog_access is computed when it is not configured: the cluster gets the default
+	// that matches the user kind, and state has to say which one that was.
+	if model.SyslogAccess.IsUnknown() {
+		model.SyslogAccess = types.StringValue(defaultUserSyslogAccess)
+		if model.Superuser.ValueBool() {
+			model.SyslogAccess = types.StringValue(defaultUserSuperuserSyslogAccess)
+		}
+	}
+
+	sessionParameters := stringMapFromMap(ctx, model.SessionParameters, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	usesysid, err := createUser(db, model, sessionParameters)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create the user", err.Error())
+		return
+	}
+
+	model.ID = types.StringValue(usesysid)
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func createUser(db *DBConnection, model userResourceModel, sessionParameters map[string]string) (string, error) {
 	tx, err := startTransaction(db.client)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer deferredRollback(tx)
 
-	stringOpts := []struct {
-		hclKey string
-		sqlKey string
-	}{
-		{userPasswordAttr, "PASSWORD"},
-		{userValidUntilAttr, "VALID UNTIL"},
-		{userSyslogAccessAttr, "SYSLOG ACCESS"},
+	createOpts := make([]string, 0, 8)
+
+	if model.Password.IsNull() || model.Password.ValueString() == "" {
+		createOpts = append(createOpts, "PASSWORD DISABLE")
+	} else {
+		createOpts = append(createOpts, fmt.Sprintf("PASSWORD '%s'", pqQuoteLiteral(model.Password.ValueString())))
 	}
 
-	intOpts := []struct {
-		hclKey string
-		sqlKey string
-	}{
-		{userConnLimitAttr, "CONNECTION LIMIT"},
-		{userSessionTimeoutAttr, "SESSION TIMEOUT"},
+	validUntil := model.ValidUntil.ValueString()
+	if validUntil == "" || strings.ToLower(validUntil) == "infinity" {
+		validUntil = "infinity"
+	}
+	createOpts = append(createOpts, fmt.Sprintf("VALID UNTIL '%s'", pqQuoteLiteral(validUntil)))
+
+	createOpts = append(createOpts, fmt.Sprintf("SYSLOG ACCESS %s", model.SyslogAccess.ValueString()))
+	createOpts = append(createOpts, fmt.Sprintf("CONNECTION LIMIT %d", model.ConnectionLimit.ValueInt64()))
+	if sessionTimeout := model.SessionTimeout.ValueInt64(); sessionTimeout != 0 {
+		createOpts = append(createOpts, fmt.Sprintf("SESSION TIMEOUT %d", sessionTimeout))
 	}
 
-	boolOpts := []struct {
-		hclKey        string
-		sqlKeyEnable  string
-		sqlKeyDisable string
-	}{
-		{userSuperuserAttr, "CREATEUSER", "NOCREATEUSER"},
-		{userCreateDBAttr, "CREATEDB", "NOCREATEDB"},
+	superuserToken := "NOCREATEUSER"
+	if model.Superuser.ValueBool() {
+		superuserToken = "CREATEUSER"
 	}
-
-	createOpts := make([]string, 0, len(stringOpts)+len(intOpts)+len(boolOpts))
-	for _, opt := range stringOpts {
-		v, ok := d.GetOk(opt.hclKey)
-		if !ok {
-			if opt.hclKey == userPasswordAttr {
-				createOpts = append(createOpts, "PASSWORD DISABLE")
-			}
-
-			if opt.hclKey == userSyslogAccessAttr {
-				if d.Get(userSuperuserAttr).(bool) {
-					createOpts = append(createOpts, "SYSLOG ACCESS UNRESTRICTED")
-				} else {
-					createOpts = append(createOpts, "SYSLOG ACCESS RESTRICTED")
-				}
-			}
-
-			continue
-		}
-
-		val := v.(string)
-		if val != "" {
-			switch opt.hclKey {
-			case userPasswordAttr:
-				createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, pqQuoteLiteral(val)))
-			case userValidUntilAttr:
-				switch {
-				case v.(string) == "", strings.ToLower(v.(string)) == "infinity":
-					createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, "infinity"))
-				default:
-					createOpts = append(createOpts, fmt.Sprintf("%s '%s'", opt.sqlKey, pqQuoteLiteral(val)))
-				}
-			case userSyslogAccessAttr:
-				createOpts = append(createOpts, fmt.Sprintf("%s %s", opt.sqlKey, val))
-			default:
-				createOpts = append(createOpts, fmt.Sprintf("%s %s", opt.sqlKey, pq.QuoteIdentifier(val)))
-			}
-		}
+	createDatabaseToken := "NOCREATEDB"
+	if model.CreateDatabase.ValueBool() {
+		createDatabaseToken = "CREATEDB"
 	}
+	createOpts = append(createOpts, superuserToken, createDatabaseToken)
 
-	for _, opt := range intOpts {
-		val := d.Get(opt.hclKey).(int)
-		if opt.hclKey == userSessionTimeoutAttr && val != 0 {
-			createOpts = append(createOpts, fmt.Sprintf("%s %d", opt.sqlKey, val))
-		} else if opt.hclKey != userSessionTimeoutAttr {
-			createOpts = append(createOpts, fmt.Sprintf("%s %d", opt.sqlKey, val))
-		}
-	}
-
-	for _, opt := range boolOpts {
-		val := d.Get(opt.hclKey).(bool)
-		valStr := opt.sqlKeyDisable
-		if val {
-			valStr = opt.sqlKeyEnable
-		}
-		createOpts = append(createOpts, valStr)
-	}
-
-	userName := d.Get(userNameAttr).(string)
-	createStr := strings.Join(createOpts, " ")
-	query := fmt.Sprintf("CREATE USER %s WITH %s", pq.QuoteIdentifier(userName), createStr)
+	userName := model.Name.ValueString()
+	query := fmt.Sprintf("CREATE USER %s WITH %s", pq.QuoteIdentifier(userName), strings.Join(createOpts, " "))
 
 	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error creating user %s: %w", userName, err)
+		return "", fmt.Errorf("error creating user %s: %w", userName, err)
 	}
 
 	var usesysid string
 	if err := tx.QueryRow("SELECT usesysid FROM pg_user_info WHERE usename = $1", userName).Scan(&usesysid); err != nil {
-		return fmt.Errorf("user does not exist in pg_user_info table: %w", err)
+		return "", fmt.Errorf("user does not exist in pg_user_info table: %w", err)
 	}
 
-	d.SetId(usesysid)
-
-	if err := setUserSessionParameters(tx, d); err != nil {
-		return err
+	if err := setUserSessionParameters(tx, userName, nil, sessionParameters); err != nil {
+		return "", err
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
+		return "", fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	return resourceRedshiftUserReadImpl(db, d)
+	return usesysid, nil
 }
 
-func resourceRedshiftUserRead(db *DBConnection, d *schema.ResourceData) error {
-	return resourceRedshiftUserReadImpl(db, d)
+func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model userResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	found, err := readUser(ctx, db, &model, &resp.Diagnostics)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to read the user", err.Error())
+		return
+	}
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
-func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) error {
+// readUser fills the model from the cluster. It reports whether the user still exists.
+// The password is never read back: the cluster does not hand it out.
+func readUser(ctx context.Context, db *DBConnection, model *userResourceModel, diagnostics *diag.Diagnostics) (bool, error) {
 	var userName, userValidUntil, userConnLimit, userSyslogAccess, userSessionTimeout string
 	var userSuperuser, userCreateDB bool
 
@@ -304,27 +359,25 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 		&userSessionTimeout,
 	}
 
-	useSysID := d.Id()
+	useSysID := model.ID.ValueString()
 
 	userSQL := fmt.Sprintf("SELECT %s FROM svv_user_info WHERE user_id = $1", strings.Join(columns, ","))
 	err := db.QueryRow(userSQL, useSysID).Scan(values...)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
-		d.SetId("")
-		return nil
+		return false, nil
 	case err != nil:
-		return fmt.Errorf("error reading User: %w", err)
+		return false, fmt.Errorf("error reading User: %w", err)
 	}
 
 	err = db.QueryRow("SELECT COALESCE(valuntil, 'infinity') FROM pg_user_info WHERE usesysid = $1", useSysID).Scan(&userValidUntil)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
-		d.SetId("")
-		return nil
+		return false, nil
 	case err != nil:
-		return fmt.Errorf("error reading User: %w", err)
+		return false, fmt.Errorf("error reading User: %w", err)
 	}
 
 	var userConfig []string
@@ -332,102 +385,231 @@ func resourceRedshiftUserReadImpl(db *DBConnection, d *schema.ResourceData) erro
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("[WARN] Redshift User (%s) not found", useSysID)
-		d.SetId("")
-		return nil
+		return false, nil
 	case err != nil:
-		return fmt.Errorf("error reading user session parameters: %w", err)
+		return false, fmt.Errorf("error reading user session parameters: %w", err)
 	}
 
 	userValidUntil, err = validateAndAdjustValidUntil(userValidUntil)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	userConnLimitNumber := -1
 	if userConnLimit != "UNLIMITED" {
 		if userConnLimitNumber, err = strconv.Atoi(userConnLimit); err != nil {
-			return err
+			return false, err
 		}
 	}
 
 	userSessionTimeoutNumber, err := strconv.Atoi(userSessionTimeout)
 	if err != nil {
+		return false, err
+	}
+
+	sessionParameters, diags := types.MapValueFrom(ctx, types.StringType, parseUserSessionParameters(userConfig))
+	diagnostics.Append(diags...)
+	if diagnostics.HasError() {
+		return true, nil
+	}
+
+	model.Name = types.StringValue(userName)
+	model.CreateDatabase = types.BoolValue(userCreateDB)
+	model.Superuser = types.BoolValue(userSuperuser)
+	model.SyslogAccess = types.StringValue(userSyslogAccess)
+	model.ConnectionLimit = types.Int64Value(int64(userConnLimitNumber))
+	model.ValidUntil = types.StringValue(userValidUntil)
+	model.SessionTimeout = types.Int64Value(int64(userSessionTimeoutNumber))
+	model.SessionParameters = sessionParameters
+
+	return true, nil
+}
+
+func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state userResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	if plan.SyslogAccess.IsUnknown() {
+		plan.SyslogAccess = types.StringValue(defaultUserSyslogAccess)
+		if plan.Superuser.ValueBool() {
+			plan.SyslogAccess = types.StringValue(defaultUserSuperuserSyslogAccess)
+		}
+	}
+
+	oldSessionParameters := stringMapFromMap(ctx, state.SessionParameters, &resp.Diagnostics)
+	newSessionParameters := stringMapFromMap(ctx, plan.SessionParameters, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := updateUser(db, plan, state, oldSessionParameters, newSessionParameters); err != nil {
+		resp.Diagnostics.AddError("Unable to update the user", err.Error())
+		return
+	}
+
+	plan.ID = state.ID
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func updateUser(db *DBConnection, plan, state userResourceModel, oldSessionParameters, newSessionParameters map[string]string) error {
+	tx, err := startTransaction(db.client)
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
+	userName := plan.Name.ValueString()
+	nameChanged := userName != state.Name.ValueString()
+
+	if nameChanged {
+		if userName == "" {
+			return fmt.Errorf("error setting user name to an empty string")
+		}
+		query := fmt.Sprintf("ALTER USER %s RENAME TO %s", pq.QuoteIdentifier(state.Name.ValueString()), pq.QuoteIdentifier(userName))
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating User NAME: %w", err)
+		}
+	}
+
+	// Renaming a user resets its password, so it is always set again afterwards.
+	if nameChanged || plan.Password.ValueString() != state.Password.ValueString() {
+		passwdTok := "PASSWORD DISABLE"
+		if password := plan.Password.ValueString(); password != "" {
+			passwdTok = fmt.Sprintf("PASSWORD '%s'", pqQuoteLiteral(password))
+		}
+		if _, err := tx.Exec(fmt.Sprintf("ALTER USER %s %s", pq.QuoteIdentifier(userName), passwdTok)); err != nil {
+			return fmt.Errorf("error updating user password: %w", err)
+		}
+	}
+
+	if plan.ConnectionLimit.ValueInt64() != state.ConnectionLimit.ValueInt64() {
+		query := fmt.Sprintf("ALTER USER %s CONNECTION LIMIT %d", pq.QuoteIdentifier(userName), plan.ConnectionLimit.ValueInt64())
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating user CONNECTION LIMIT: %w", err)
+		}
+	}
+
+	if plan.CreateDatabase.ValueBool() != state.CreateDatabase.ValueBool() {
+		tok := "NOCREATEDB"
+		if plan.CreateDatabase.ValueBool() {
+			tok = "CREATEDB"
+		}
+		if _, err := tx.Exec(fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)); err != nil {
+			return fmt.Errorf("error updating user CREATEDB: %w", err)
+		}
+	}
+
+	if plan.Superuser.ValueBool() != state.Superuser.ValueBool() {
+		tok := "NOCREATEUSER"
+		if plan.Superuser.ValueBool() {
+			tok = "CREATEUSER"
+		}
+		if _, err := tx.Exec(fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)); err != nil {
+			return fmt.Errorf("error updating user SUPERUSER: %w", err)
+		}
+	}
+
+	if validUntil := plan.ValidUntil.ValueString(); validUntil != "" && validUntil != state.ValidUntil.ValueString() {
+		if strings.ToLower(validUntil) == "infinity" {
+			validUntil = "infinity"
+		}
+		query := fmt.Sprintf("ALTER USER %s VALID UNTIL '%s'", pq.QuoteIdentifier(userName), pqQuoteLiteral(validUntil))
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating user VALID UNTIL: %w", err)
+		}
+	}
+
+	if plan.SyslogAccess.ValueString() != state.SyslogAccess.ValueString() {
+		query := fmt.Sprintf("ALTER USER %s WITH SYSLOG ACCESS %s", pq.QuoteIdentifier(userName), plan.SyslogAccess.ValueString())
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating user SYSLOG ACCESS: %w", err)
+		}
+	}
+
+	if plan.SessionTimeout.ValueInt64() != state.SessionTimeout.ValueInt64() {
+		var query string
+		if plan.SessionTimeout.ValueInt64() == 0 {
+			query = fmt.Sprintf("ALTER USER %s RESET SESSION TIMEOUT", pq.QuoteIdentifier(userName))
+		} else {
+			query = fmt.Sprintf("ALTER USER %s SESSION TIMEOUT %d", pq.QuoteIdentifier(userName), plan.SessionTimeout.ValueInt64())
+		}
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating user SESSION TIMEOUT: %w", err)
+		}
+	}
+
+	if err := setUserSessionParameters(tx, userName, oldSessionParameters, newSessionParameters); err != nil {
 		return err
 	}
 
-	sessionParameters := parseUserSessionParameters(userConfig)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
+	}
+	return nil
+}
 
-	d.Set(userNameAttr, userName)
-	d.Set(userCreateDBAttr, userCreateDB)
-	d.Set(userSuperuserAttr, userSuperuser)
-	d.Set(userSyslogAccessAttr, userSyslogAccess)
-	d.Set(userConnLimitAttr, userConnLimitNumber)
-	d.Set(userValidUntilAttr, userValidUntil)
-	d.Set(userSessionTimeoutAttr, userSessionTimeoutNumber)
-	d.Set(userSessionParametersAttr, sessionParameters)
+func setUserSessionParameters(tx *sql.Tx, userName string, oldParams, newParams map[string]string) error {
+	// RESET parameters that were removed from the map.
+	for name := range oldParams {
+		if _, ok := newParams[name]; ok {
+			continue
+		}
+		if err := validateSessionParameterName(name); err != nil {
+			return err
+		}
+		query := fmt.Sprintf("ALTER USER %s RESET %s", pq.QuoteIdentifier(userName), name)
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error resetting user session parameter %q: %w", name, err)
+		}
+	}
+
+	// SET parameters that were added or changed.
+	for name, value := range newParams {
+		if old, ok := oldParams[name]; ok && old == value {
+			continue
+		}
+		if err := validateSessionParameterName(name); err != nil {
+			return err
+		}
+		query := fmt.Sprintf("ALTER USER %s SET %s = '%s'", pq.QuoteIdentifier(userName), name, pqQuoteLiteral(value))
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error setting user session parameter %q: %w", name, err)
+		}
+	}
 
 	return nil
 }
 
-// parseUserSessionParameters parses pg_user.useconfig (a text[] of
-// "param=value" strings) into session_parameters state. The provider is the
-// exclusive owner of a user's session parameters: any parameter present on
-// the user but absent from config is adopted into state and RESET on the
-// next apply, so config remains the single source of truth. Redshift folds
-// parameter names to lowercase, so names are normalized the same way.
-func parseUserSessionParameters(userConfig []string) map[string]string {
-	sessionParameters := make(map[string]string, len(userConfig))
-	for _, entry := range userConfig {
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) != 2 {
-			log.Printf("[WARN] ignoring unparseable useconfig entry %q", entry)
-			continue
-		}
-		name := strings.ToLower(parts[0])
-		sessionParameters[name] = unquoteUseConfigValue(parts[1])
+func (r *userResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model userResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	return sessionParameters
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	err := retryOnPQErrors(ctx, func() error {
+		return deleteUser(db, model.ID.ValueString(), model.Name.ValueString())
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to delete the user", err.Error())
+	}
 }
 
-// unquoteUseConfigValue reverses the quoting Redshift applies to useconfig
-// values. Values containing characters such as spaces or commas (for example a
-// multi-schema search_path) are stored wrapped in double quotes with any
-// embedded double quotes doubled. Because the provider always writes values via
-// `ALTER USER ... SET <param> = '<value>'`, reversing that serialization lets
-// such values round-trip without a perpetual diff. Values without special
-// characters are stored verbatim and pass through unchanged.
-func unquoteUseConfigValue(value string) string {
-	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-		value = value[1 : len(value)-1]
-		value = strings.ReplaceAll(value, `""`, `"`)
-	}
-	return value
-}
-
-const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
-
-var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
-var correctDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?\+00$`)
-
-func validateAndAdjustValidUntil(validUntil string) (string, error) {
-	if validUntil == "infinity" {
-		return validUntil, nil
-	} else if validUntil == redshiftDataApiInfinityDateString {
-		// The Redshift Data API translates the `infinity` to a date in 2038 (see https://en.wikipedia.org/wiki/Year_2038_problem)
-		return "infinity", nil
-	} else if redshiftDataApiDatetimeRegexp.MatchString(validUntil) {
-		// The Redshift Data API returns the datetime without the timezone offset, so we need to add it
-		validUntil += "+00"
-	}
-	if !correctDatetimeRegexp.MatchString(validUntil) {
-		return "", fmt.Errorf(`received invalid date format for valid_until: %q, expected format is "YYYY-MM-DD HH:MM:SS+00"`, validUntil)
-	}
-	return validUntil, nil
-}
-
-func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error {
-	useSysID := d.Id()
-	userName := d.Get(userNameAttr).(string)
+func deleteUser(db *DBConnection, useSysID, userName string) error {
 	rawUsername, err := db.client.config.GetUsername(db)
 	if err != nil {
 		return fmt.Errorf("error retrieving username: %w", err)
@@ -554,260 +736,68 @@ func resourceRedshiftUserDelete(db *DBConnection, d *schema.ResourceData) error 
 	return nil
 }
 
-func resourceRedshiftUserUpdate(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client)
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	if err := setUserName(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserPassword(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserConnLimit(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserCreateDB(tx, d); err != nil {
-		return err
-	}
-	if err := setUserSuperuser(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserValidUntil(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserSyslogAccess(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserSessionTimeout(tx, d); err != nil {
-		return err
-	}
-
-	if err := setUserSessionParameters(tx, d); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
-	}
-
-	return resourceRedshiftUserReadImpl(db, d)
-}
-
-func setUserName(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userNameAttr) {
-		return nil
-	}
-
-	oldRaw, newRaw := d.GetChange(userNameAttr)
-	oldValue := oldRaw.(string)
-	newValue := newRaw.(string)
-
-	if newValue == "" {
-		return fmt.Errorf("error setting user name to an empty string")
-	}
-
-	query := fmt.Sprintf("ALTER USER %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating User NAME: %w", err)
-	}
-
-	return nil
-}
-
-func setUserPassword(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userPasswordAttr) && !d.HasChange(userNameAttr) {
-		return nil
-	}
-
-	userName := d.Get(userNameAttr).(string)
-	password := d.Get(userPasswordAttr).(string)
-
-	passwdTok := "PASSWORD DISABLE"
-	if password != "" {
-		passwdTok = fmt.Sprintf("PASSWORD '%s'", pqQuoteLiteral(password))
-	}
-
-	query := fmt.Sprintf("ALTER USER %s %s", pq.QuoteIdentifier(userName), passwdTok)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user password: %w", err)
-	}
-	return nil
-}
-
-func setUserConnLimit(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userConnLimitAttr) {
-		return nil
-	}
-
-	connLimit := d.Get(userConnLimitAttr).(int)
-	userName := d.Get(userNameAttr).(string)
-	query := fmt.Sprintf("ALTER USER %s CONNECTION LIMIT %d", pq.QuoteIdentifier(userName), connLimit)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user CONNECTION LIMIT: %w", err)
-	}
-
-	return nil
-}
-
-func setUserSessionTimeout(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userSessionTimeoutAttr) {
-		return nil
-	}
-
-	sessionTimeout := d.Get(userSessionTimeoutAttr).(int)
-	userName := d.Get(userNameAttr).(string)
-	var query string
-	if sessionTimeout == 0 {
-		query = fmt.Sprintf("ALTER USER %s RESET SESSION TIMEOUT", pq.QuoteIdentifier(userName))
-	} else {
-		query = fmt.Sprintf("ALTER USER %s SESSION TIMEOUT %d", pq.QuoteIdentifier(userName), sessionTimeout)
-	}
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user SESSION TIMEOUT: %w", err)
-	}
-
-	return nil
-}
-
-func setUserSessionParameters(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userSessionParametersAttr) {
-		return nil
-	}
-
-	userName := d.Get(userNameAttr).(string)
-	oldRaw, newRaw := d.GetChange(userSessionParametersAttr)
-	oldParams := oldRaw.(map[string]interface{})
-	newParams := newRaw.(map[string]interface{})
-
-	// RESET parameters that were removed from the map.
-	for name := range oldParams {
-		if _, ok := newParams[name]; ok {
+// parseUserSessionParameters parses pg_user.useconfig (a text[] of
+// "param=value" strings) into session_parameters state. The provider is the
+// exclusive owner of a user's session parameters: any parameter present on
+// the user but absent from config is adopted into state and RESET on the
+// next apply, so config remains the single source of truth. Redshift folds
+// parameter names to lowercase, so names are normalized the same way.
+func parseUserSessionParameters(userConfig []string) map[string]string {
+	sessionParameters := make(map[string]string, len(userConfig))
+	for _, entry := range userConfig {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			log.Printf("[WARN] ignoring unparseable useconfig entry %q", entry)
 			continue
 		}
-		if err := validateSessionParameterName(name); err != nil {
-			return err
-		}
-		query := fmt.Sprintf("ALTER USER %s RESET %s", pq.QuoteIdentifier(userName), name)
-		if _, err := tx.Exec(query); err != nil {
-			return fmt.Errorf("error resetting user session parameter %q: %w", name, err)
-		}
+		name := strings.ToLower(parts[0])
+		sessionParameters[name] = unquoteUseConfigValue(parts[1])
 	}
-
-	// SET parameters that were added or changed.
-	for name, v := range newParams {
-		value := v.(string)
-		if old, ok := oldParams[name]; ok && old.(string) == value {
-			continue
-		}
-		if err := validateSessionParameterName(name); err != nil {
-			return err
-		}
-		query := fmt.Sprintf("ALTER USER %s SET %s = '%s'", pq.QuoteIdentifier(userName), name, pqQuoteLiteral(value))
-		if _, err := tx.Exec(query); err != nil {
-			return fmt.Errorf("error setting user session parameter %q: %w", name, err)
-		}
-	}
-
-	return nil
+	return sessionParameters
 }
 
-func setUserCreateDB(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userCreateDBAttr) {
-		return nil
+// unquoteUseConfigValue reverses the quoting Redshift applies to useconfig
+// values. Values containing characters such as spaces or commas (for example a
+// multi-schema search_path) are stored wrapped in double quotes with any
+// embedded double quotes doubled. Because the provider always writes values via
+// `ALTER USER ... SET <param> = '<value>'`, reversing that serialization lets
+// such values round-trip without a perpetual diff. Values without special
+// characters are stored verbatim and pass through unchanged.
+func unquoteUseConfigValue(value string) string {
+	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, `""`, `"`)
 	}
-
-	createDB := d.Get(userCreateDBAttr).(bool)
-	tok := "NOCREATEDB"
-	if createDB {
-		tok = "CREATEDB"
-	}
-	userName := d.Get(userNameAttr).(string)
-	query := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user CREATEDB: %w", err)
-	}
-
-	return nil
+	return value
 }
 
-func setUserSuperuser(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userSuperuserAttr) {
-		return nil
-	}
+const redshiftDataApiInfinityDateString = "2038-01-19 03:14:04"
 
-	superuser := d.Get(userSuperuserAttr).(bool)
-	tok := "NOCREATEUSER"
-	if superuser {
-		tok = "CREATEUSER"
-	}
-	userName := d.Get(userNameAttr).(string)
-	query := fmt.Sprintf("ALTER USER %s WITH %s", pq.QuoteIdentifier(userName), tok)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user SUPERUSER: %w", err)
-	}
+var redshiftDataApiDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
+var correctDatetimeRegexp = regexp.MustCompile(`^\d+-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?\+00$`)
 
-	return nil
+func validateAndAdjustValidUntil(validUntil string) (string, error) {
+	if validUntil == "infinity" {
+		return validUntil, nil
+	} else if validUntil == redshiftDataApiInfinityDateString {
+		// The Redshift Data API translates the `infinity` to a date in 2038 (see https://en.wikipedia.org/wiki/Year_2038_problem)
+		return "infinity", nil
+	} else if redshiftDataApiDatetimeRegexp.MatchString(validUntil) {
+		// The Redshift Data API returns the datetime without the timezone offset, so we need to add it
+		validUntil += "+00"
+	}
+	if !correctDatetimeRegexp.MatchString(validUntil) {
+		return "", fmt.Errorf(`received invalid date format for valid_until: %q, expected format is "YYYY-MM-DD HH:MM:SS+00"`, validUntil)
+	}
+	return validUntil, nil
 }
 
-func setUserValidUntil(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(userValidUntilAttr) {
+// stringMapFromMap reads a map of strings out of a framework value.
+func stringMapFromMap(ctx context.Context, values types.Map, diagnostics *diag.Diagnostics) map[string]string {
+	if values.IsNull() || values.IsUnknown() {
 		return nil
 	}
-
-	validUntil := d.Get(userValidUntilAttr).(string)
-	if validUntil == "" {
-		return nil
-	} else if strings.ToLower(validUntil) == "infinity" {
-		validUntil = "infinity"
-	}
-
-	userName := d.Get(userNameAttr).(string)
-	query := fmt.Sprintf("ALTER USER %s VALID UNTIL '%s'", pq.QuoteIdentifier(userName), pqQuoteLiteral(validUntil))
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user VALID UNTIL: %w", err)
-	}
-
-	return nil
-}
-
-func setUserSyslogAccess(tx *sql.Tx, d *schema.ResourceData) error {
-	syslogAccessCurrent := d.Get(userSyslogAccessAttr).(string)
-	syslogAccessComputed := syslogAccessCurrent
-	if syslogAccessComputed == "" {
-		syslogAccessComputed = defaultUserSyslogAccess
-	}
-
-	if d.Get(userSuperuserAttr).(bool) {
-		syslogAccessComputed = defaultUserSuperuserSyslogAccess
-	}
-
-	if syslogAccessCurrent == syslogAccessComputed && !d.HasChange(userSyslogAccessAttr) {
-		return nil
-	}
-
-	userName := d.Get(userNameAttr).(string)
-	query := fmt.Sprintf("ALTER USER %s WITH SYSLOG ACCESS %s", pq.QuoteIdentifier(userName), syslogAccessComputed)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating user SYSLOG ACCESS: %w", err)
-	}
-
-	return nil
-}
-
-func getDefaultSyslogAccess(d *schema.ResourceData) string {
-	if d.Get(userSuperuserAttr).(bool) {
-		return defaultUserSuperuserSyslogAccess
-	}
-
-	return defaultUserSyslogAccess
+	result := map[string]string{}
+	diagnostics.Append(values.ElementsAs(ctx, &result, false)...)
+	return result
 }
