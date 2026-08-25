@@ -369,7 +369,9 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 }
 
 func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		newNamespaceDataSource,
+	}
 }
 
 // stringWithEnvDefault mirrors schema.EnvDefaultFunc: the configured value wins, then the
