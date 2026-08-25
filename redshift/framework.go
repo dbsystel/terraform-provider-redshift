@@ -2,13 +2,18 @@ package redshift
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/lib/pq"
 )
 
 // frameworkClient is embedded by every framework resource and data source. It holds the
@@ -79,4 +84,51 @@ func (v regexDoesNotMatchValidator) ValidateString(ctx context.Context, req vali
 	if v.regexp.MatchString(req.ConfigValue.ValueString()) {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid Attribute Value", fmt.Sprintf("%s: %s", v.Description(ctx), req.ConfigValue.ValueString()))
 	}
+}
+
+// normalizeStringPlanModifier stores a normalized form of the configured value, which is
+// what the SDK resources do with a StateFunc.
+type normalizeStringPlanModifier struct {
+	normalize func(string) string
+}
+
+func normalizeString(normalize func(string) string) planmodifier.String {
+	return normalizeStringPlanModifier{normalize: normalize}
+}
+
+func (m normalizeStringPlanModifier) Description(_ context.Context) string {
+	return "stores a normalized form of the configured value"
+}
+
+func (m normalizeStringPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m normalizeStringPlanModifier) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	resp.PlanValue = types.StringValue(m.normalize(req.ConfigValue.ValueString()))
+}
+
+// retryOnPQErrors retries an operation that failed with one of the Redshift errors that
+// concurrent operations produce spuriously. It is the framework counterpart of
+// ResourceRetryOnPQErrors, and unlike it reports the last error instead of swallowing it.
+func retryOnPQErrors(ctx context.Context, fn func() error) error {
+	var err error
+	for attempt := 0; attempt < resourceRetryAttempts; attempt++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		var pqErr *pq.Error
+		if !errors.As(err, &pqErr) || !isRetryablePQError(string(pqErr.Code)) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
+	return err
 }

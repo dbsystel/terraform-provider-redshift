@@ -82,9 +82,11 @@ func ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(conte
 	}
 }
 
+const resourceRetryAttempts = 10
+
 func ResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
 	return func(db *DBConnection, d *schema.ResourceData) error {
-		for i := 0; i < 10; i++ {
+		for i := 0; i < resourceRetryAttempts; i++ {
 			err := fn(db, d)
 			if err == nil {
 				return nil
