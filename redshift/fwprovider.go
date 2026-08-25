@@ -367,6 +367,7 @@ func (m *frameworkProviderModel) settings(ctx context.Context) (*providerSetting
 func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		newRoleResource,
+		newRoleGrantResource,
 	}
 }
 
