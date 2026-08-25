@@ -522,7 +522,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		}
 	}
 
-	callables := stripArgumentsFromCallablesDefinitions(d.Get(grantObjectsAttr).(*schema.Set))
+	callables := stripArgumentsFromCallablesDefinitions(setToStringSlice(d.Get(grantObjectsAttr)))
 
 	if isGrantToPublic(d) {
 		query = `
@@ -789,8 +789,8 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			fromEntityName,
 		)
 	case "TABLE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
-		if objects.Len() > 0 {
+		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
 				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
@@ -808,8 +808,8 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			)
 		}
 	case "FUNCTION", "PROCEDURE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
-		if objects.Len() > 0 {
+		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
 				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
@@ -827,7 +827,7 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			)
 		}
 	case "LANGUAGE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
+		objects := setToStringSlice(d.Get(grantObjectsAttr))
 		query = fmt.Sprintf(
 			"REVOKE USAGE ON LANGUAGE %s FROM %s %s",
 			setToPgIdentList(objects, ""),
@@ -880,8 +880,8 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 			toEntityName,
 		)
 	case "TABLE", "LANGUAGE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
-		if objects.Len() > 0 {
+		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"GRANT %s ON %s %s TO %s %s",
 				strings.Join(privileges, ","),
@@ -901,8 +901,8 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 			)
 		}
 	case "FUNCTION", "PROCEDURE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
-		if objects.Len() > 0 {
+		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"GRANT %s ON %s %s TO %s %s",
 				strings.Join(privileges, ","),

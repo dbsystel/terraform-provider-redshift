@@ -40,7 +40,7 @@ Manages Redshift group memberships. Allows either to exclusively manage group me
 
 func resourceRedshiftGroupMembershipCreate(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+	userNames := setToStringSlice(d.Get(groupUsersAttr))
 
 	if len(userNames) == 0 {
 		return fmt.Errorf("at least one user must be specified in %q", groupUsersAttr)
@@ -69,7 +69,7 @@ func addUsersToGroup(db *DBConnection, group string, userNames []string) error {
 
 func resourceRedshiftGroupMembershipRead(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+	userNames := setToStringSlice(d.Get(groupUsersAttr))
 
 	userNamesParam := buildUserStringArray(userNames, true)
 
@@ -96,8 +96,8 @@ func resourceRedshiftGroupMembershipRead(db *DBConnection, d *schema.ResourceDat
 
 func resourceRedshiftGroupMembershipUpdate(db *DBConnection, d *schema.ResourceData) error {
 	rawUserNamesOld, rawUserNamesNew := d.GetChange(groupUsersAttr)
-	oldUserNames := parseUserNames(rawUserNamesOld)
-	newUserNames := parseUserNames(rawUserNamesNew)
+	oldUserNames := setToStringSlice(rawUserNamesOld)
+	newUserNames := setToStringSlice(rawUserNamesNew)
 	if len(newUserNames) == 0 {
 		return fmt.Errorf("at least one user must be specified in %q", groupUsersAttr)
 	}
@@ -152,7 +152,7 @@ func calculateUserNamesDiff(oldUserNames, newUserNames []string) (deletedUserNam
 
 func resourceRedshiftGroupMembershipDelete(db *DBConnection, d *schema.ResourceData) error {
 	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+	userNames := setToStringSlice(d.Get(groupUsersAttr))
 
 	return dropUsersFromGroup(db, groupName, userNames)
 }
@@ -168,15 +168,6 @@ func dropUsersFromGroup(db *DBConnection, groupName string, userNames []string) 
 		return fmt.Errorf("could not remove users %s from group %q: %w", userNamesParam, groupName, err)
 	}
 	return nil
-}
-
-func parseUserNames(rawUserNames interface{}) []string {
-	rawUserNamesTyped := rawUserNames.(*schema.Set).List()
-	userNames := make([]string, len(rawUserNamesTyped))
-	for index, userNameRaw := range rawUserNamesTyped {
-		userNames[index] = userNameRaw.(string)
-	}
-	return userNames
 }
 
 func buildUserStringArray(userNames []string, encodeAsLiteral bool) string {

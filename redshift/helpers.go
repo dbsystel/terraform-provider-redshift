@@ -189,13 +189,13 @@ func appendIfTrue(condition bool, item string, list *[]string) {
 	}
 }
 
-func setToPgIdentList(identifiers *schema.Set, prefix string) string {
-	quoted := make([]string, identifiers.Len())
-	for i, identifier := range identifiers.List() {
+func setToPgIdentList(identifiers []string, prefix string) string {
+	quoted := make([]string, len(identifiers))
+	for i, identifier := range identifiers {
 		if prefix == "" {
-			quoted[i] = pq.QuoteIdentifier(identifier.(string))
+			quoted[i] = pq.QuoteIdentifier(identifier)
 		} else {
-			quoted[i] = fmt.Sprintf("%s.%s", pq.QuoteIdentifier(prefix), pq.QuoteIdentifier(identifier.(string)))
+			quoted[i] = fmt.Sprintf("%s.%s", pq.QuoteIdentifier(prefix), pq.QuoteIdentifier(identifier))
 		}
 	}
 
@@ -203,27 +203,33 @@ func setToPgIdentList(identifiers *schema.Set, prefix string) string {
 }
 
 // Quoted identifiers somehow does not work for grants/revokes on functions and procedures
-func setToPgIdentListNotQuoted(identifiers *schema.Set, prefix string) string {
-	quoted := make([]string, identifiers.Len())
-	for i, identifier := range identifiers.List() {
+func setToPgIdentListNotQuoted(identifiers []string, prefix string) string {
+	quoted := make([]string, len(identifiers))
+	for i, identifier := range identifiers {
 		if prefix == "" {
-			quoted[i] = identifier.(string)
+			quoted[i] = identifier
 		} else {
-			quoted[i] = fmt.Sprintf("%s.%s", prefix, identifier.(string))
+			quoted[i] = fmt.Sprintf("%s.%s", prefix, identifier)
 		}
 	}
 
 	return strings.Join(quoted, ",")
 }
 
-func stripArgumentsFromCallablesDefinitions(defs *schema.Set) []string {
-	parser := func(name string) string {
-		return strings.Split(name, "(")[0]
-	}
-
-	names := make([]string, defs.Len())
-	for _, def := range defs.List() {
-		names = append(names, parser(def.(string)))
+func stripArgumentsFromCallablesDefinitions(defs []string) []string {
+	names := make([]string, len(defs))
+	for i, def := range defs {
+		names[i] = strings.Split(def, "(")[0]
 	}
 	return names
+}
+
+// setToStringSlice reads a schema.TypeSet of strings out of the resource data.
+func setToStringSlice(raw interface{}) []string {
+	elements := raw.(*schema.Set).List()
+	values := make([]string, len(elements))
+	for i, element := range elements {
+		values[i] = element.(string)
+	}
+	return values
 }
