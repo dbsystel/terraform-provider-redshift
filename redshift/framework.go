@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -181,4 +182,19 @@ func stringsFromSet(ctx context.Context, set types.Set, diagnostics *diag.Diagno
 	var values []string
 	diagnostics.Append(set.ElementsAs(ctx, &values, false)...)
 	return values
+}
+
+// requiresReplaceIfListSizeChangedModifier replaces the resource when a block is added or
+// removed, which is what forceNewIfListSizeChanged does for the SDK resources.
+func requiresReplaceIfListSizeChanged() planmodifier.List {
+	return listplanmodifier.RequiresReplaceIf(
+		func(_ context.Context, req planmodifier.ListRequest, resp *listplanmodifier.RequiresReplaceIfFuncResponse) {
+			if req.StateValue.IsNull() || req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
+				return
+			}
+			resp.RequiresReplace = len(req.StateValue.Elements()) != len(req.PlanValue.Elements())
+		},
+		"Replace the resource when blocks are added or removed",
+		"Replace the resource when blocks are added or removed",
+	)
 }
