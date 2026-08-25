@@ -94,15 +94,15 @@ func (c *Client) Connect() (*DBConnection, error) {
 	dsn := c.config.ConnStr
 	driverName := c.config.DriverName
 
+	// A cached connection is trusted without a liveness probe: database/sql
+	// itself redials a broken pooled connection on next use, so a dead DSN
+	// surfaces as a normal query error to the caller instead of costing an
+	// extra timeout here.
 	checkExisting := func() (*DBConnection, bool) {
 		dbRegistryLock.Lock()
+		defer dbRegistryLock.Unlock()
 		conn, found := dbRegistry[dsn]
-		dbRegistryLock.Unlock()
-
-		if found && conn.Ping() == nil {
-			return conn, true
-		}
-		return nil, false
+		return conn, found
 	}
 
 	conn, ok := checkExisting()

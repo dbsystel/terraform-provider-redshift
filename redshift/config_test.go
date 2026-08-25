@@ -14,10 +14,7 @@ import (
 // fakeConn simulates a live Redshift connection: it answers
 // "SELECT current_user;" (the query GetUsername runs) and nothing else.
 // It counts current_user queries on its parent driver, since that query
-// runs exactly once per genuine (non-deduped) connection establishment —
-// unlike raw driver.Open calls, which also fire on every Ping() re-dial
-// forced by MaxIdleConns(0) (a separate, pre-existing behavior, untouched
-// here).
+// runs exactly once per genuine (non-deduped) connection establishment.
 type fakeConn struct{ drv *fakeDriver }
 
 func (fakeConn) Prepare(query string) (driver.Stmt, error) { return nil, fmt.Errorf("not implemented") }
@@ -115,9 +112,28 @@ func TestConnect_SameDSNDeduplicates(t *testing.T) {
 	if got := atomic.LoadInt32(&drv.queryCount); got != 1 {
 		t.Fatalf("GetUsername query ran %d times, want 1 (concurrent Connect() calls for the same DSN should de-dupe to one connection establishment)", got)
 	}
+	if got := atomic.LoadInt32(&drv.openCount); got != 1 {
+		t.Fatalf("driver Open() called %d times, want 1 (a cached connection must not be re-dialed)", got)
+	}
 	for i, conn := range conns {
 		if conn != conns[0] {
 			t.Fatalf("goroutine %d got a different *DBConnection than goroutine 0", i)
 		}
+	}
+}
+
+func TestConnect_CachedConnectionSkipsRedial(t *testing.T) {
+	drv := &fakeDriver{delay: 10 * time.Millisecond}
+	c := newTestClient(t, "fakeredshift_cachehit", "dsn-cachehit", drv)
+
+	if _, err := c.Connect(); err != nil {
+		t.Fatalf("first Connect() error: %v", err)
+	}
+	if _, err := c.Connect(); err != nil {
+		t.Fatalf("second Connect() error: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&drv.openCount); got != 1 {
+		t.Fatalf("driver Open() called %d times across two Connect() calls, want 1", got)
 	}
 }
