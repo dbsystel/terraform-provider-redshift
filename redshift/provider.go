@@ -134,9 +134,13 @@ func Provider() *schema.Provider {
 							DefaultFunc:  schema.EnvDefaultFunc("REDSHIFT_DATA_API_USERNAME", nil),
 							ValidateFunc: validation.StringLenBetween(1, 128),
 						},
+						// region is Optional rather than Required so that the schema does
+						// not depend on the environment: the SDK downgrades a Required
+						// argument to Optional whenever its DefaultFunc returns a value.
+						// A missing region is reported when the provider is configured.
 						"region": {
 							Type:        schema.TypeString,
-							Required:    true,
+							Optional:    true,
 							Description: "The AWS region where the Redshift workgroup or cluster is located.",
 							DefaultFunc: schema.MultiEnvDefaultFunc([]string{"AWS_REGION", "AWS_DEFAULT_REGION"}, nil),
 						},
