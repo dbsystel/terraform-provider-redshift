@@ -11,7 +11,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	sdkterraform "github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/lib/pq"
 )
 
@@ -199,7 +199,7 @@ func TestDataApiConfigurationHasNoConflicts(t *testing.T) {
 		}},
 	}
 
-	for _, d := range Provider().Validate(terraform.NewResourceConfigRaw(raw)) {
+	for _, d := range Provider().Validate(sdkterraform.NewResourceConfigRaw(raw)) {
 		t.Errorf("unexpected diagnostic: %s: %s (path %v)", d.Summary, d.Detail, d.AttributePath)
 	}
 }
@@ -215,7 +215,7 @@ func TestSessionParametersConflictWithDataApi(t *testing.T) {
 		"session_parameters": map[string]interface{}{"query_group": "superuser"},
 	}
 
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	diags := Provider().Validate(sdkterraform.NewResourceConfigRaw(raw))
 	var found bool
 	for _, d := range diags {
 		if strings.Contains(d.Summary, "Conflicting configuration arguments") && strings.Contains(d.Detail, "session_parameters") {
@@ -241,7 +241,7 @@ func TestUnusableConnectTimeoutEnvIsIgnored(t *testing.T) {
 					"region":         "us-west-2",
 				}},
 			}
-			for _, d := range Provider().Validate(terraform.NewResourceConfigRaw(raw)) {
+			for _, d := range Provider().Validate(sdkterraform.NewResourceConfigRaw(raw)) {
 				t.Errorf("data_api configuration rejected: %s: %s", d.Summary, d.Detail)
 			}
 
@@ -259,7 +259,7 @@ func TestNegativeConnectTimeoutIsRejected(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
 	raw := map[string]interface{}{"host": "redshift.example.com", "connect_timeout": -1}
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	diags := Provider().Validate(sdkterraform.NewResourceConfigRaw(raw))
 	if len(diags) == 0 {
 		t.Fatal("expected connect_timeout = -1 to be rejected, got no diagnostics")
 	}
@@ -274,7 +274,7 @@ func TestInvalidSessionParametersFailValidation(t *testing.T) {
 		"host":               "redshift.example.com",
 		"session_parameters": map[string]interface{}{"query_group": "bad value"},
 	}
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	diags := Provider().Validate(sdkterraform.NewResourceConfigRaw(raw))
 	if len(diags) == 0 {
 		t.Fatal("expected invalid options to be rejected at validate time, got no diagnostics")
 	}

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftDatasharePrivilege_Namespace(t *testing.T) {
@@ -28,9 +28,9 @@ resource "redshift_datashare_privilege" "consumer_namespace" {
 `, dataShareNameAttr, shareName, datasharePrivilegeShareNameAttr, datasharePrivilegeNamespaceAttr, consumerNamespace)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatasharePrivilegeDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatasharePrivilegeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -59,9 +59,9 @@ resource "redshift_datashare_privilege" "consumer_account" {
 `, dataShareNameAttr, shareName, datasharePrivilegeShareNameAttr, datasharePrivilegeAccountAttr, consumerAccount)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatasharePrivilegeDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatasharePrivilegeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,

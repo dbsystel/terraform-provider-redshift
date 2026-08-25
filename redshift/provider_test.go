@@ -11,24 +11,47 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	sdkterraform "github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	redshiftdatasqldriver "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
 var (
-	testAccProviders map[string]func() (*schema.Provider, error)
-	testAccProvider  *schema.Provider
+	testAccProtoV6Providers map[string]func() (tfprotov6.ProviderServer, error)
+	testAccProvider         *schema.Provider
 )
 
 func init() {
+	// testAccProvider stays the very same SDK provider instance that is served to the
+	// tests, so that the checks reaching for its meta value keep working while resources
+	// are migrated to the framework one at a time.
 	testAccProvider = Provider()
-	testAccProviders = map[string]func() (*schema.Provider, error){
-		"redshift":   func() (*schema.Provider, error) { return testAccProvider, nil },
-		"testvalues": getTestValuesProvider,
+	testAccProtoV6Providers = map[string]func() (tfprotov6.ProviderServer, error){
+		"redshift": func() (tfprotov6.ProviderServer, error) {
+			server, err := muxedProviderServerFor(context.Background(), testAccProvider.GRPCProvider)
+			if err != nil {
+				return nil, err
+			}
+			return server(), nil
+		},
+		"testvalues": func() (tfprotov6.ProviderServer, error) {
+			provider, err := getTestValuesProvider()
+			if err != nil {
+				return nil, err
+			}
+			return protoV6SDKProviderServer(provider)
+		},
 	}
+}
+
+// protoV6SDKProviderServer serves a helper provider written against the SDK over protocol
+// 6, which is what the muxed provider under test speaks.
+func protoV6SDKProviderServer(provider *schema.Provider) (tfprotov6.ProviderServer, error) {
+	return tf5to6server.UpgradeServer(context.Background(), provider.GRPCProvider)
 }
 
 func TestProvider(t *testing.T) {
@@ -86,7 +109,7 @@ func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
 			},
 		}
 	}
-	diagnostics := provider.Configure(context.Background(), terraform.NewResourceConfigRaw(cfg))
+	diagnostics := provider.Configure(context.Background(), sdkterraform.NewResourceConfigRaw(cfg))
 	if diagnostics != nil {
 		if diagnostics.HasError() {
 			t.Fatalf("Failed to configure temporary credentials provider: %v", diagnostics)
@@ -138,7 +161,7 @@ func TestAccRedshiftDataApiServerlessConnect(t *testing.T) {
 	_ = getEnvOrSkip("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", t)
 	unsetAndSetEnvVars(t, "REDSHIFT_HOST")
 	provider := Provider()
-	provider.Configure(context.Background(), terraform.NewResourceConfigRaw(map[string]interface{}{}))
+	provider.Configure(context.Background(), sdkterraform.NewResourceConfigRaw(map[string]interface{}{}))
 	client, ok := provider.Meta().(*Client)
 	if !ok {
 		t.Fatal("Unable to initialize client")
@@ -355,7 +378,7 @@ func testCalculatedProviderValues(t *testing.T, providerConfig string, expectedE
 %[2]s
 `, providerConfig, testDbConfig)
 	resource.Test(t, resource.TestCase{
-		ProviderFactories: testAccProviders,
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config:      cfg,

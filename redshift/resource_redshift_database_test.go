@@ -9,17 +9,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccResourceRedshiftDatabase_Basic(t *testing.T) {
 	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_resource_basic"), "-", "_")
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatabaseDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatabaseDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccResourceRedshiftDatabaseConfigBasic(dbName),
@@ -72,9 +72,9 @@ resource "redshift_user" "user" {
 	`, databaseNameAttr, dbNameNew, databaseOwnerAttr, userNameAttr, databaseConnLimitAttr, userName)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatabaseDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatabaseDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -105,9 +105,9 @@ func TestAccResourceRedshiftDatabase_ZeroETL(t *testing.T) {
 	}
 	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_zeroetl"), "-", "_")
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatabaseDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatabaseDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccResourceRedshiftDatabaseConfigZeroETL(dbName, integrationId),
@@ -141,8 +141,8 @@ resource "redshift_database" "db" {
 func TestAccResourceRedshiftDatabase_ZeroETLConflictsWithDatashare(t *testing.T) {
 	dbName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_conflict"), "-", "_")
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccResourceRedshiftDatabaseConfigZeroETLConflict(dbName),

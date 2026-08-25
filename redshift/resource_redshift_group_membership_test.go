@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftGroupMembership_Basic(t *testing.T) {
@@ -51,9 +51,9 @@ resource "redshift_user" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -128,9 +128,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config1,
@@ -230,9 +230,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, newGroupName, userName1, userName2, userName3)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config1,
@@ -292,9 +292,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config1,
@@ -328,9 +328,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config1,

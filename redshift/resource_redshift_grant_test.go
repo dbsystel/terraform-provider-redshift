@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	tfschema "github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/lib/pq"
 )
 
@@ -50,9 +50,9 @@ resource "redshift_grant" "user" {
 `, schemaName, userName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -78,9 +78,9 @@ resource "redshift_grant" "public" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -106,9 +106,9 @@ resource "redshift_grant" "public" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -136,9 +136,9 @@ resource "redshift_grant" "public" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -190,9 +190,9 @@ resource "redshift_grant" "grant" {
 `, groupName)
 	fmt.Println(config2)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config1,
@@ -262,9 +262,9 @@ func TestAccRedshiftGrant_BasicDatabase(t *testing.T) {
 		}
 		`, groupName, userName, roleName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -357,9 +357,9 @@ func TestAccRedshiftGrant_BasicSchema(t *testing.T) {
 		}
 		`, userName, groupName, schemaName, roleName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -444,9 +444,9 @@ func TestAccRedshiftGrant_BasicTable(t *testing.T) {
 		}
 		`, groupName, userName, roleName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -519,9 +519,9 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 	for i, groupName := range groupNames {
 		userName := userNames[i]
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: testAccRedshiftGrantBasicCallablesConfigUserGroup(userName, groupName, schema),
@@ -632,9 +632,9 @@ func TestAccRedshiftGrant_BasicLanguage(t *testing.T) {
 		}
 		`, userName, groupName, addedLanguage, secondLanguage)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -694,9 +694,9 @@ func TestAccRedshiftGrant_Regression_GH_Issue_24(t *testing.T) {
 		}
 		`, userName, schemaName, dbName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      func(s *terraform.State) error { return nil },
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             func(s *terraform.State) error { return nil },
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -758,9 +758,9 @@ resource "redshift_grant" "grants2" {
 `, userName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -942,9 +942,9 @@ func TestAccRedshiftGrant_AllTables_AddRemovePrivileges(t *testing.T) {
 	grantID := fmt.Sprintf("un:%s_ot:table_%s", userName, schemaName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantUserConfig(userName),
@@ -997,9 +997,9 @@ func TestAccRedshiftGrant_AllTables_ExtraPrivilegeIgnored(t *testing.T) {
 	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_extra"), "-", "_")
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantUserConfig(userName),
@@ -1039,9 +1039,9 @@ func TestAccRedshiftGrant_AllTables_UncoveredTableConverges(t *testing.T) {
 	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_uncovered"), "-", "_")
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantUserConfig(userName),
@@ -1093,9 +1093,9 @@ func TestAccRedshiftGrant_AllTables_EmptySchema(t *testing.T) {
 	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_emptyschema"), "-", "_")
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantUserConfig(userName),
@@ -1220,9 +1220,9 @@ func TestAccRedshiftGrant_AllTables_MaterializedView(t *testing.T) {
 	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_matview"), "-", "_")
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantUserConfig(userName),
@@ -1252,9 +1252,9 @@ func TestAccRedshiftGrant_AllTables_Group(t *testing.T) {
 	grantID := fmt.Sprintf("gn:%s_ot:table_%s", groupName, schemaName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGrantGroupConfig(groupName),
@@ -1295,9 +1295,9 @@ func TestAccRedshiftGrant_AllTables_Public(t *testing.T) {
 	grantID := fmt.Sprintf("gn:public_ot:table_%s", schemaName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccRedshiftGrantDropSchema(schemaName),
 		Steps: []resource.TestStep{
 			{
 				// The anchor group only configures the provider so the following

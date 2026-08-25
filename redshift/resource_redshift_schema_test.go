@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftSchema_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftSchemaConfig,
@@ -77,9 +77,9 @@ resource "redshift_user" "schema_user1" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -128,9 +128,9 @@ resource "redshift_user" "schema_dl_user1" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -186,9 +186,9 @@ resource "redshift_schema" "spectrum" {
 `,
 		schemaNameAttr, schemaName, schemaExternalSchemaAttr, dbName, tfArray(iamRoleArns))
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -255,9 +255,9 @@ resource "redshift_schema" "hive" {
 `,
 		schemaNameAttr, schemaName, schemaExternalSchemaAttr, dbName, dbHostname, dbPort, tfArray(iamRoleArns))
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -335,9 +335,9 @@ resource "redshift_schema" "postgres" {
 `,
 		schemaNameAttr, schemaName, schemaExternalSchemaAttr, dbName, dbHostname, dbPort, dbSchema, tfArray(iamRoleArns), dbSecretArn)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -411,9 +411,9 @@ resource "redshift_schema" "mysql" {
 `,
 		schemaNameAttr, schemaName, schemaExternalSchemaAttr, dbName, dbHostname, dbPort, tfArray(iamRoleArns), dbSecretArn)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -473,9 +473,9 @@ resource "redshift_schema" "redshift" {
 `,
 		schemaNameAttr, schemaName, schemaExternalSchemaAttr, dbName, dbSchema)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -527,9 +527,9 @@ resource "redshift_schema" "redshift" {
 `, schemaName, dbName, roleArn)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftSchemaDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftSchemaDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,

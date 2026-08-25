@@ -3,7 +3,7 @@ package redshift
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccDataSourceRedshiftNamespace(t *testing.T) {
@@ -13,8 +13,8 @@ data "redshift_namespace" "namespace" {
 }
 `
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config: config,

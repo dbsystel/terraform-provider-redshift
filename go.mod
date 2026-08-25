@@ -17,6 +17,7 @@ require (
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-mux v0.23.1
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
+	github.com/hashicorp/terraform-plugin-testing v1.16.0
 	github.com/lib/pq v1.12.3
 	github.com/mmichaelb/redshift-data-sql-driver v0.4.0
 	golang.org/x/net v0.58.0
