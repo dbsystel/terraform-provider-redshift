@@ -373,6 +373,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		newNamespaceDataSource,
 		newUserDataSource,
 		newGroupDataSource,
+		newDatabaseDataSource,
 	}
 }
 

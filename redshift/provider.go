@@ -216,8 +216,7 @@ func Provider() *schema.Provider {
 			"redshift_datashare_privilege": redshiftDatasharePrivilege(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"redshift_schema":   dataSourceRedshiftSchema(),
-			"redshift_database": dataSourceRedshiftDatabase(),
+			"redshift_schema": dataSourceRedshiftSchema(),
 		},
 		ConfigureContextFunc: providerConfigure,
 	}
