@@ -9,7 +9,21 @@ import (
 var (
 	dbRegistryLock sync.Mutex
 	dbRegistry     = make(map[string]*DBConnection, 1)
+	dbConnectLocks = make(map[string]*sync.Mutex, 1)
 )
+
+// dsnLock returns the per-DSN mutex that serializes connection
+// establishment for a single DSN, without blocking other DSNs.
+func dsnLock(dsn string) *sync.Mutex {
+	dbRegistryLock.Lock()
+	defer dbRegistryLock.Unlock()
+	l, ok := dbConnectLocks[dsn]
+	if !ok {
+		l = &sync.Mutex{}
+		dbConnectLocks[dsn] = l
+	}
+	return l
+}
 
 type Config struct {
 	DriverName string
@@ -77,37 +91,62 @@ func (c *Config) GetUsername(db *DBConnection) (string, error) {
 // Callers must return their database resources. Use of QueryRow() or Exec() is encouraged.
 // Query() must have their rows.Close()'ed.
 func (c *Client) Connect() (*DBConnection, error) {
-	dbRegistryLock.Lock()
-	defer dbRegistryLock.Unlock()
-
 	dsn := c.config.ConnStr
 	driverName := c.config.DriverName
-	conn, found := dbRegistry[dsn]
 
-	if !found || conn.Ping() != nil {
-		db, err := sql.Open(driverName, dsn)
-		if err != nil {
-			return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q): %w", driverName, err)
+	checkExisting := func() (*DBConnection, bool) {
+		dbRegistryLock.Lock()
+		conn, found := dbRegistry[dsn]
+		dbRegistryLock.Unlock()
+
+		if found && conn.Ping() == nil {
+			return conn, true
 		}
-
-		// We don't want to retain connection
-		// So when we connect on a specific database which might be managed by terraform,
-		// we don't keep opened connection in case of the db has to be dropped in the plan.
-		db.SetMaxIdleConns(0)
-		db.SetMaxOpenConns(c.config.MaxConns)
-
-		conn = &DBConnection{
-			db,
-			c,
-		}
-
-		_, err = c.config.GetUsername(conn)
-		if err != nil {
-			return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q): %w", driverName, err)
-		}
-
-		dbRegistry[dsn] = conn
+		return nil, false
 	}
+
+	conn, ok := checkExisting()
+	if ok {
+		return conn, nil
+	}
+
+	// Serialize connection establishment per-DSN only, so concurrent
+	// Connect() calls to different DSNs never block each other.
+	l := dsnLock(dsn)
+	l.Lock()
+	defer l.Unlock()
+
+	// Re-check: another goroutine may have already (re)connected this DSN
+	// while we were waiting on the per-DSN lock.
+	conn, ok = checkExisting()
+	if ok {
+		return conn, nil
+	}
+
+	db, err := sql.Open(driverName, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("error creating Redshift driver instance (driver: %q): %w", driverName, err)
+	}
+
+	// We don't want to retain connection
+	// So when we connect on a specific database which might be managed by terraform,
+	// we don't keep opened connection in case of the db has to be dropped in the plan.
+	db.SetMaxIdleConns(0)
+	db.SetMaxOpenConns(c.config.MaxConns)
+
+	conn = &DBConnection{
+		db,
+		c,
+	}
+
+	_, err = c.config.GetUsername(conn)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving username from Redshift database (driver: %q): %w", driverName, err)
+	}
+
+	dbRegistryLock.Lock()
+	dbRegistry[dsn] = conn
+	dbRegistryLock.Unlock()
 
 	return conn, nil
 }
