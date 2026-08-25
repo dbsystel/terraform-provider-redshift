@@ -663,7 +663,7 @@ func testAccCheckRedshiftUserCanLogin(user string, password string) resource.Tes
 			sslMode = "require"
 		}
 		config := NewPqConfig(os.Getenv("REDSHIFT_HOST"), database, user, password, portNum, sslMode,
-			defaultProviderMaxOpenConnections)
+			defaultProviderMaxOpenConnections, defaultConnectTimeoutInSeconds, nil)
 
 		client := config.NewClient()
 		if err != nil {

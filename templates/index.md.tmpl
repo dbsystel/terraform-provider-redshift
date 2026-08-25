@@ -36,6 +36,58 @@ Please note that only one authentication method can be used at a time. There is 
 
 {{ .SchemaMarkdown | trimspace }}
 
+## Connection Tuning
+
+{{ tffile "examples/provider/provider_with_connection_tuning.tf" }}
+
+### Connection timeouts
+
+`connect_timeout` defaults to 180 seconds, so a cluster the provider cannot reach — a
+closed security group, a disconnected VPN, a paused cluster — stalls Terraform for
+minutes before reporting an error. Connection attempts do not overlap, so a run waits for
+roughly this timeout multiplied by the number of resources Terraform has in flight. With
+the default `-parallelism=10`, `connect_timeout = 5` keeps that under a minute.
+
+When it is not set the provider reads `PGCONNECT_TIMEOUT`, so you can shorten it for a
+single run without editing your configuration; values that are not a non-negative integer
+are ignored.
+
+### Session parameters
+
+Useful parameters include:
+
+* [`statement_timeout`](https://docs.aws.amazon.com/redshift/latest/dg/r_statement_timeout.html)
+  stops any statement running longer than the given number of **milliseconds**. On Redshift
+  this budget covers planning, queueing in workload management and execution, not just
+  execution time.
+* [`query_group`](https://docs.aws.amazon.com/redshift/latest/dg/r_query_group.html) routes
+  statements to a particular workload management queue — see
+  [Query groups and the superuser queue](#query-groups-and-the-superuser-queue) below.
+
+Because these are sent using the libpq `options` connection parameter, setting
+`session_parameters` causes the `PGOPTIONS` environment variable to be ignored in its
+entirety. The provider emits a warning when both are present.
+
+### Query groups and the superuser queue
+
+Redshift routes queries to workload management queues. The statements this provider runs
+are control plane work — creating users, granting privileges, managing schemas — and are
+generally quick, but by default they share a queue with your operational queries and can
+end up waiting behind long-running ones. Setting
+[`query_group`](https://docs.aws.amazon.com/redshift/latest/dg/r_query_group.html) routes
+them somewhere else.
+
+Redshift reserves a superuser queue that sits outside your configured WLM queues, so
+provider statements sent to it are not held up by operational queries. Reaching it
+requires connecting as a superuser; for anyone else the setting has no effect on routing.
+It is the first of the
+[WLM queue assignment rules](https://docs.aws.amazon.com/redshift/latest/dg/cm-c-wlm-queue-assignment-rules.html),
+whose example configuration also shows it having a concurrency of 1. That single query
+slot means provider statements sent there run one at a time.
+
+You can also point `query_group` at a queue defined in your own WLM configuration, which
+is worth doing if you want to give provider statements dedicated concurrency and memory.
+
 ## Proxy Support
 
 If your Redshift cluster is only accessible from within a VPC, you can use the `ALL_PROXY` (`all_proxy`)

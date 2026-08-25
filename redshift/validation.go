@@ -178,5 +178,13 @@ var dbGroupValidate = validation.All(
 	validation.StringNotInSlice(reservedWords, true),
 )
 
+// Session parameter values are interpolated into the whitespace-separated argument list
+// carried by the libpq `options` connection parameter. Redshift splits that list using
+// isspace(), which covers vertical tab and form feed as well as space and tab, so the
+// permitted characters are listed inclusively rather than by excluding the separators
+// known today. A value can then never introduce an argument of its own.
+// See https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html
+var sessionParameterValueRegexp = regexp.MustCompile(`^[A-Za-z0-9_.,:/@+-]+$`)
+
 var awsAccountIdRegexp = regexp.MustCompile(`^\d{12}$`)
 var uuidRegex = regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")
