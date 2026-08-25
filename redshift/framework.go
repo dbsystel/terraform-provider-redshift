@@ -132,3 +132,53 @@ func retryOnPQErrors(ctx context.Context, fn func() error) error {
 	}
 	return err
 }
+
+// normalizeSetPlanModifier is normalizeString for a set of strings: the framework has no
+// per-element hook, so the whole set is rewritten.
+type normalizeSetPlanModifier struct {
+	normalize func(string) string
+}
+
+func normalizeSet(normalize func(string) string) planmodifier.Set {
+	return normalizeSetPlanModifier{normalize: normalize}
+}
+
+func (m normalizeSetPlanModifier) Description(_ context.Context) string {
+	return "stores a normalized form of the configured values"
+}
+
+func (m normalizeSetPlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m normalizeSetPlanModifier) PlanModifySet(ctx context.Context, req planmodifier.SetRequest, resp *planmodifier.SetResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	var values []string
+	resp.Diagnostics.Append(req.ConfigValue.ElementsAs(ctx, &values, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for i, value := range values {
+		values[i] = m.normalize(value)
+	}
+
+	normalized, diags := types.SetValueFrom(ctx, types.StringType, values)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.PlanValue = normalized
+}
+
+// stringsFromSet reads a set of strings out of a framework value.
+func stringsFromSet(ctx context.Context, set types.Set, diagnostics *diag.Diagnostics) []string {
+	if set.IsNull() || set.IsUnknown() {
+		return nil
+	}
+	var values []string
+	diagnostics.Append(set.ElementsAs(ctx, &values, false)...)
+	return values
+}
