@@ -19,6 +19,10 @@ const (
 	defaultConnectTimeoutInSeconds                         = 180
 )
 
+// Provider returns the terraform-plugin-sdk/v2 half of the provider. It is muxed with
+// the framework provider in New(), which requires both halves to publish the exact same
+// provider configuration schema. That is why the blocks below declare no MaxItems: the
+// framework cannot emit it, and enforces the same limit with listvalidator.SizeAtMost.
 func Provider() *schema.Provider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
@@ -99,7 +103,6 @@ func Provider() *schema.Provider {
 				Type:        schema.TypeList,
 				Optional:    true,
 				Description: "Configuration for using the Redshift Data API. Supports both serverless workgroups and provisioned clusters.",
-				MaxItems:    1,
 				ConflictsWith: []string{
 					"host",
 					"password",
@@ -108,6 +111,10 @@ func Provider() *schema.Provider {
 				},
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
+						// workgroup_name and cluster_identifier declare no ExactlyOneOf: the
+						// SDK only supports it inside a MaxItems: 1 block, which data_api
+						// can no longer be (see Provider). The framework provider enforces
+						// it for both halves of the muxed provider.
 						"workgroup_name": {
 							Type:        schema.TypeString,
 							Optional:    true,
@@ -117,7 +124,6 @@ func Provider() *schema.Provider {
 								validation.StringLenBetween(3, 64),
 								validation.StringMatch(regexp.MustCompile("[a-z0-9-]+"), "must be lowercase alphanumeric or hyphen characters"),
 							),
-							ExactlyOneOf: []string{"data_api.0.workgroup_name", "data_api.0.cluster_identifier"},
 						},
 						"cluster_identifier": {
 							Type:         schema.TypeString,
@@ -125,7 +131,6 @@ func Provider() *schema.Provider {
 							Description:  "The identifier of the provisioned Redshift cluster to connect to.",
 							DefaultFunc:  schema.EnvDefaultFunc("REDSHIFT_DATA_API_CLUSTER_IDENTIFIER", nil),
 							ValidateFunc: validation.StringLenBetween(1, 63),
-							ExactlyOneOf: []string{"data_api.0.workgroup_name", "data_api.0.cluster_identifier"},
 						},
 						"username": {
 							Type:         schema.TypeString,
@@ -151,7 +156,6 @@ func Provider() *schema.Provider {
 				Type:        schema.TypeList,
 				Optional:    true,
 				Description: "Configuration for obtaining a temporary password using redshift:GetClusterCredentials",
-				MaxItems:    1,
 				ConflictsWith: []string{
 					"password",
 					"data_api",
@@ -341,7 +345,6 @@ func assumeRoleSchema() *schema.Schema {
 		Type:        schema.TypeList,
 		Description: "Optional assume role data used to obtain temporary credentials",
 		Optional:    true,
-		MaxItems:    1,
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"arn": {
