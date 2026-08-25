@@ -1,9 +1,14 @@
 package redshift
 
 import (
+	"context"
+	"fmt"
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
 // frameworkClient is embedded by every framework resource and data source. It holds the
@@ -46,4 +51,32 @@ func (c *frameworkClient) connect(diagnostics *diag.Diagnostics) *DBConnection {
 		return nil
 	}
 	return db
+}
+
+// regexDoesNotMatchValidator is the counterpart of stringvalidator.RegexMatches, which
+// terraform-plugin-framework-validators has no negated form of.
+type regexDoesNotMatchValidator struct {
+	regexp  *regexp.Regexp
+	message string
+}
+
+func regexDoesNotMatch(expression *regexp.Regexp, message string) validator.String {
+	return regexDoesNotMatchValidator{regexp: expression, message: message}
+}
+
+func (v regexDoesNotMatchValidator) Description(_ context.Context) string {
+	return v.message
+}
+
+func (v regexDoesNotMatchValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v regexDoesNotMatchValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if v.regexp.MatchString(req.ConfigValue.ValueString()) {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid Attribute Value", fmt.Sprintf("%s: %s", v.Description(ctx), req.ConfigValue.ValueString()))
+	}
 }
