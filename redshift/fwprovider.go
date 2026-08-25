@@ -373,6 +373,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		newDatasharePrivilegeResource,
 		newDefaultPrivilegesResource,
 		newGroupResource,
+		newDatashareResource,
 	}
 }
 

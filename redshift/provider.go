@@ -202,11 +202,10 @@ func Provider() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"redshift_user":      redshiftUser(),
-			"redshift_schema":    redshiftSchema(),
-			"redshift_grant":     redshiftGrant(),
-			"redshift_database":  redshiftDatabase(),
-			"redshift_datashare": redshiftDatashare(),
+			"redshift_user":     redshiftUser(),
+			"redshift_schema":   redshiftSchema(),
+			"redshift_grant":    redshiftGrant(),
+			"redshift_database": redshiftDatabase(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"redshift_schema": dataSourceRedshiftSchema(),

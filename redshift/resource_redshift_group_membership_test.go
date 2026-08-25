@@ -404,7 +404,7 @@ func testAccCheckRedshiftGroupMembershipDestroy(s *terraform.State) error {
 	return nil
 }
 
-func Test_calculateUserNamesDiff(t *testing.T) {
+func Test_diffStrings(t *testing.T) {
 	type args struct {
 		oldUserNames []string
 		newUserNames []string
@@ -480,12 +480,12 @@ func Test_calculateUserNamesDiff(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotDeletedUserNames, gotAddedUserNames := calculateUserNamesDiff(tt.args.oldUserNames, tt.args.newUserNames)
+			gotDeletedUserNames, gotAddedUserNames := diffStrings(tt.args.oldUserNames, tt.args.newUserNames)
 			if !reflect.DeepEqual(gotDeletedUserNames, tt.wantDeletedUserNames) {
-				t.Errorf("calculateUserNamesDiff() gotDeletedUserNames = %v, want %v", gotDeletedUserNames, tt.wantDeletedUserNames)
+				t.Errorf("diffStrings() gotDeletedUserNames = %v, want %v", gotDeletedUserNames, tt.wantDeletedUserNames)
 			}
 			if !reflect.DeepEqual(gotAddedUserNames, tt.wantAddedUserNames) {
-				t.Errorf("calculateUserNamesDiff() gotAddedUserNames = %v, want %v", gotAddedUserNames, tt.wantAddedUserNames)
+				t.Errorf("diffStrings() gotAddedUserNames = %v, want %v", gotAddedUserNames, tt.wantAddedUserNames)
 			}
 		})
 	}

@@ -278,7 +278,7 @@ func updateGroup(db *DBConnection, oldName, newName string, oldUserNames, newUse
 }
 
 func setGroupUsers(tx *sql.Tx, groupName string, oldUserNames, newUserNames []string) error {
-	removedUsers, addedUsers := calculateUserNamesDiff(oldUserNames, newUserNames)
+	removedUsers, addedUsers := diffStrings(oldUserNames, newUserNames)
 
 	if len(removedUsers) > 0 {
 		var removedUsersNamesSafe []string

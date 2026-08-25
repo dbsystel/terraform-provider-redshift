@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
@@ -199,12 +200,12 @@ func (r *groupMembershipResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	groupName := plan.Name.ValueString()
-	deletedUserNames, addedUserNames := calculateUserNamesDiff(oldUserNames, newUserNames)
-	if err := dropUsersFromGroup(db, groupName, deletedUserNames); err != nil {
+	removed, added := diffStrings(oldUserNames, newUserNames)
+	if err := dropUsersFromGroup(db, groupName, removed); err != nil {
 		resp.Diagnostics.AddError("Unable to remove users from the group", err.Error())
 		return
 	}
-	if err := addUsersToGroup(db, groupName, addedUserNames); err != nil {
+	if err := addUsersToGroup(db, groupName, added); err != nil {
 		resp.Diagnostics.AddError("Unable to add users to the group", err.Error())
 		return
 	}
@@ -213,34 +214,20 @@ func (r *groupMembershipResource) Update(ctx context.Context, req resource.Updat
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-func calculateUserNamesDiff(oldUserNames, newUserNames []string) (deletedUserNames, addedUserNames []string) {
-	deletedUserNames = make([]string, 0)
-	addedUserNames = make([]string, 0)
-	for _, oldUserName := range oldUserNames {
-		found := false
-		for _, newUserName := range newUserNames {
-			if oldUserName == newUserName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			deletedUserNames = append(deletedUserNames, oldUserName)
+func diffStrings(before, after []string) (removed, added []string) {
+	removed = make([]string, 0)
+	added = make([]string, 0)
+	for _, beforeValue := range before {
+		if !slices.Contains(after, beforeValue) {
+			removed = append(removed, beforeValue)
 		}
 	}
-	for _, newUserName := range newUserNames {
-		found := false
-		for _, oldUserName := range oldUserNames {
-			if newUserName == oldUserName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			addedUserNames = append(addedUserNames, newUserName)
+	for _, afterValue := range after {
+		if !slices.Contains(before, afterValue) {
+			added = append(added, afterValue)
 		}
 	}
-	return deletedUserNames, addedUserNames
+	return removed, added
 }
 
 func (r *groupMembershipResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
