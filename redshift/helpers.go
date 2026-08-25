@@ -24,8 +24,6 @@ const (
 	pqErrorDuplicateKeyViolation = "23505"
 
 	pqErrorCodeDuplicateSchema = "42P06"
-
-	pgErrorCodeInsufficientPrivileges = "42501"
 )
 
 // startTransaction starts a new DB transaction using the provided client.
@@ -114,10 +112,6 @@ func isRetryablePQError(code string) bool {
 
 	_, ok := retryable[code]
 	return ok
-}
-
-func isPqErrorWithCode(err error, code string) bool {
-	return string(err.(*pq.Error).Code) == code
 }
 
 func splitCsvAndTrim(raw string) ([]string, error) {

@@ -440,31 +440,35 @@ func resourceRedshiftSchemaReadImpl(db *DBConnection, d *schema.ResourceData) er
 }
 
 func resourceRedshiftSchemaReadLocal(db *DBConnection, d *schema.ResourceData) error {
-	var schemaQuota = 0
-	isServerless, err := db.client.config.IsServerless(db)
-	if err != nil {
+	// svv_redshift_schema_quota reports the quota in MB on every cluster type, so one
+	// query serves Serverless, Multi-AZ and single-AZ provisioned alike. The view also
+	// lists schemas of datashare-visible databases, and its shared-schema rows join the
+	// quota on schema_id alone, which is unique only within a database -- so constraining
+	// database_name is what keeps this lookup unambiguous.
+	//
+	// Every schema of the connected database is listed, carrying a NULL quota when none
+	// is set. A missing row therefore means the lookup failed rather than that the schema
+	// is unlimited, and reporting that as quota 0 would produce a phantom diff that
+	// Terraform would "correct" by clearing a live quota.
+	var schemaQuota sql.NullInt64
+	err := db.QueryRow(`
+		SELECT quota
+		FROM svv_redshift_schema_quota
+		WHERE database_name = $1
+		  AND schema_name = $2
+	`, db.client.config.Database, d.Get(schemaNameAttr)).Scan(&schemaQuota)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("schema %q was not found in svv_redshift_schema_quota for database %q: cannot determine its quota", d.Get(schemaNameAttr), db.client.config.Database)
+	case err != nil:
 		return err
 	}
-
-	if isServerless {
-		err = db.QueryRow(`
-			SELECT COALESCE(quota, 0)
-			FROM svv_redshift_schema_quota
-			WHERE database_name = $1 
-			  AND schema_name = $2
-		`, db.client.config.Database, d.Get(schemaNameAttr)).Scan(&schemaQuota)
-	} else {
-		err = db.QueryRow(`
-			SELECT
-			COALESCE(quota, 0)
-			FROM svv_schema_quota_state
-			WHERE schema_id = $1
-		`, d.Id()).Scan(&schemaQuota)
+	// A NULL quota means the schema is unlimited, which the resource models as 0.
+	quota := 0
+	if schemaQuota.Valid {
+		quota = int(schemaQuota.Int64)
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	d.Set(schemaQuotaAttr, schemaQuota)
+	d.Set(schemaQuotaAttr, quota)
 	d.Set(schemaExternalSchemaAttr, nil)
 
 	return nil
