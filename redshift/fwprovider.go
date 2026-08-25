@@ -375,6 +375,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		newGroupResource,
 		newDatashareResource,
 		newDatabaseResource,
+		newGrantResource,
 	}
 }
 

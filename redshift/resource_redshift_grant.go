@@ -1,14 +1,25 @@
 package redshift
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
@@ -40,205 +51,332 @@ var grantObjectTypesCodes = map[string][]string{
 	"function":  {"f"},
 }
 
-func redshiftGrant() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ resource.Resource              = &grantResource{}
+	_ resource.ResourceWithConfigure = &grantResource{}
+)
+
+func newGrantResource() resource.Resource {
+	return &grantResource{}
+}
+
+type grantResource struct {
+	frameworkClient
+}
+
+type grantResourceModel struct {
+	ID         types.String `tfsdk:"id"`
+	User       types.String `tfsdk:"user"`
+	Group      types.String `tfsdk:"group"`
+	Role       types.String `tfsdk:"role"`
+	SchemaName types.String `tfsdk:"schema"`
+	Database   types.String `tfsdk:"database"`
+	ObjectType types.String `tfsdk:"object_type"`
+	Objects    types.Set    `tfsdk:"objects"`
+	Privileges types.Set    `tfsdk:"privileges"`
+
+	// objects and privileges as plain strings, filled once per operation.
+	objects    []string
+	privileges []string
+}
+
+func (r *grantResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_grant"
+}
+
+func (r *grantResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: `
 Defines access privileges for users and  groups. Privileges include access options such as being able to read data in tables and views, write data, create tables, and drop tables. Use this command to give specific privileges for a table, database, schema, function, procedure, language, or column.
 `,
-		ReadContext: ResourceFunc(resourceRedshiftGrantRead),
-		CreateContext: ResourceFunc(
-			ResourceRetryOnPQErrors(resourceRedshiftGrantCreate),
-		),
-		DeleteContext: ResourceFunc(
-			ResourceRetryOnPQErrors(resourceRedshiftGrantDelete),
-		),
-
-		// Since we revoke all when creating, we can use create as update
-		UpdateContext: ResourceFunc(
-			ResourceRetryOnPQErrors(resourceRedshiftGrantCreate),
-		),
-
-		Schema: map[string]*schema.Schema{
-			grantUserAttr: {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     true,
-				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
-				Description:  "The name of the user to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.",
-				ValidateFunc: validation.StringDoesNotMatch(regexp.MustCompile("^(?i)public$"), "User name cannot be 'public'. To use GRANT ... TO PUBLIC set the group name to 'public' instead."),
-			},
-			grantGroupAttr: {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     true,
-				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
-				Description:  "The name of the group to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.",
-				StateFunc: func(val interface{}) string {
-					name := val.(string)
-					if strings.ToLower(name) == grantToPublicName {
-						return strings.ToLower(name)
-					}
-					return name
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The grant ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			grantRoleAttr: {
-				Type:         schema.TypeString,
-				Optional:     true,
-				ForceNew:     true,
-				ExactlyOneOf: []string{grantUserAttr, grantGroupAttr, grantRoleAttr},
-				Description:  "The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.", // todo: change when role grants are read back from the system tables
-				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
-				},
-			},
-			grantSchemaAttr: {
-				Type:        schema.TypeString,
+			grantUserAttr: schema.StringAttribute{
 				Optional:    true,
-				ForceNew:    true,
-				Description: "The database schema to grant privileges on.",
-			},
-			grantDatabaseAttr: {
-				Type:        schema.TypeString,
-				Optional:    true,
-				ForceNew:    true,
-				Description: "The name of the database to grant privileges on. Only used when `object_type` is `database`. By default, the database to which the provider is connected will be used",
-			},
-			grantObjectTypeAttr: {
-				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
-				ValidateFunc: validation.StringInSlice(grantAllowedObjectTypes, false),
-				Description:  "The Redshift object type to grant privileges on (one of: " + strings.Join(grantAllowedObjectTypes, ", ") + ").",
-			},
-			grantObjectsAttr: {
-				Type:     schema.TypeSet,
-				Optional: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-					StateFunc: func(val interface{}) string {
-						return strings.ToLower(val.(string))
-					},
+				Description: "The name of the user to grant privileges on. Exactly one of `user`, `group`, or `role` must be set.",
+				Validators: []validator.String{
+					regexDoesNotMatch(regexp.MustCompile("^(?i)public$"), "User name cannot be 'public'. To use GRANT ... TO PUBLIC set the group name to 'public' instead."),
+					stringvalidator.ExactlyOneOf(
+						path.MatchRoot(grantGroupAttr),
+						path.MatchRoot(grantRoleAttr),
+					),
 				},
-				Set:         schema.HashString,
-				Description: "The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type; see the resource notes on grants on all objects in a schema for what to expect. Ignored when `object_type` is one of (`database`, `schema`).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
-			grantPrivilegesAttr: {
-				Type:     schema.TypeSet,
-				Required: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-					StateFunc: func(val interface{}) string {
-						strVal := strings.ToLower(val.(string))
-						if strVal == "temporary" {
-							strVal = "temp"
+			grantGroupAttr: schema.StringAttribute{
+				Optional:    true,
+				Description: "The name of the group to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Settings the group name to `public` or `PUBLIC` (it is case insensitive in this case) will result in a `GRANT ... TO PUBLIC` statement.",
+				PlanModifiers: []planmodifier.String{
+					// Only the special PUBLIC group is case insensitive.
+					normalizeString(func(name string) string {
+						if strings.ToLower(name) == grantToPublicName {
+							return strings.ToLower(name)
 						}
-						return strVal
-					},
+						return name
+					}),
+					stringplanmodifier.RequiresReplace(),
 				},
-				Set:         schema.HashString,
+			},
+			grantRoleAttr: schema.StringAttribute{
+				Optional:    true,
+				Description: "The name of the role to grant privileges on. Exactly one of `user`, `group`, or `role` must be set. Keep in mind: When granting to a role, the privileges are not read back from the system tables. The GRANT is executed successfully, so we trust the state.", // todo: change when role grants are read back from the system tables
+				PlanModifiers: []planmodifier.String{
+					normalizeString(strings.ToLower),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			grantSchemaAttr: schema.StringAttribute{
+				Optional:    true,
+				Description: "The database schema to grant privileges on.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			grantDatabaseAttr: schema.StringAttribute{
+				Optional:    true,
+				Description: "The name of the database to grant privileges on. Only used when `object_type` is `database`. By default, the database to which the provider is connected will be used",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			grantObjectTypeAttr: schema.StringAttribute{
+				Required:    true,
+				Description: "The Redshift object type to grant privileges on (one of: " + strings.Join(grantAllowedObjectTypes, ", ") + ").",
+				Validators: []validator.String{
+					stringvalidator.OneOf(grantAllowedObjectTypes...),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			grantObjectsAttr: schema.SetAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "The objects upon which to grant the privileges. An empty list (the default) means to grant permissions on all objects of the specified type; see the resource notes on grants on all objects in a schema for what to expect. Ignored when `object_type` is one of (`database`, `schema`).",
+				PlanModifiers: []planmodifier.Set{
+					normalizeSet(strings.ToLower),
+					setplanmodifier.RequiresReplace(),
+				},
+			},
+			grantPrivilegesAttr: schema.SetAttribute{
+				Required:    true,
+				ElementType: types.StringType,
 				Description: "The list of privileges to apply as default privileges. See [GRANT command documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html) to see what privileges are available to which object type. An empty list could be provided to revoke all privileges for this user or group. Required when `object_type` is set to `language`.",
+				PlanModifiers: []planmodifier.Set{
+					// "temporary" is spelled "temp" everywhere Redshift reports it back.
+					normalizeSet(func(privilege string) string {
+						privilege = strings.ToLower(privilege)
+						if privilege == "temporary" {
+							return "temp"
+						}
+						return privilege
+					}),
+				},
 			},
 		},
 	}
 }
 
-func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error {
-	objectType := d.Get(grantObjectTypeAttr).(string)
-	schemaName := d.Get(grantSchemaAttr).(string)
-	objects := d.Get(grantObjectsAttr).(*schema.Set).List()
+func (r *grantResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
+}
 
-	var privileges []string
-	for _, p := range d.Get(grantPrivilegesAttr).(*schema.Set).List() {
-		privileges = append(privileges, p.(string))
+func (r *grantResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model grantResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.apply(ctx, model, &resp.Diagnostics, &resp.State)
+}
+
+func (r *grantResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Applying revokes everything first, so it doubles as the update.
+	var model grantResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.apply(ctx, model, &resp.Diagnostics, &resp.State)
+}
+
+func (r *grantResource) apply(ctx context.Context, model grantResourceModel, diagnostics *diag.Diagnostics, state *tfsdk.State) {
+	db := r.connect(diagnostics)
+	if db == nil {
+		return
 	}
 
-	// validate parameters
+	model.objects = stringsFromSet(ctx, model.Objects, diagnostics)
+	model.privileges = stringsFromSet(ctx, model.Privileges, diagnostics)
+	if diagnostics.HasError() {
+		return
+	}
+
+	if err := validateGrant(model); err != nil {
+		diagnostics.AddError("Invalid grant", err.Error())
+		return
+	}
+
+	err := retryOnPQErrors(ctx, func() error { return applyGrants(db, model) })
+	if err != nil {
+		diagnostics.AddError("Unable to apply the grants", err.Error())
+		return
+	}
+
+	model.ID = types.StringValue(generateGrantID(model))
+	diagnostics.Append(state.Set(ctx, model)...)
+}
+
+func validateGrant(model grantResourceModel) error {
+	objectType := model.ObjectType.ValueString()
+	schemaName := model.SchemaName.ValueString()
+
 	if (objectType == "table" || objectType == "function" || objectType == "procedure") && schemaName == "" {
 		return fmt.Errorf("parameter `%s` is required for objects of type table, function and procedure", grantSchemaAttr)
 	}
 
-	if (objectType == "database" || objectType == "schema") && len(objects) > 0 {
+	if (objectType == "database" || objectType == "schema") && len(model.objects) > 0 {
 		return fmt.Errorf("cannot specify `%s` when `%s` is `database` or `schema`", grantObjectsAttr, grantObjectTypeAttr)
 	}
 
-	if objectType == "language" && len(objects) == 0 {
+	if objectType == "language" && len(model.objects) == 0 {
 		return fmt.Errorf("parameter `%s` is required for objects of type language", grantObjectsAttr)
 	}
 
-	if !validatePrivileges(privileges, objectType) {
-		return fmt.Errorf(`invalid privileges list %+v for object of type %q`, privileges, objectType)
-	}
-
-	databaseName := getDatabaseName(db, d)
-
-	tx, err := startTransaction(db.client)
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	if err := revokeGrants(tx, databaseName, d); err != nil {
-		return err
-	}
-
-	if err := createGrants(tx, databaseName, d); err != nil {
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
-	}
-
-	d.SetId(generateGrantID(d))
-
-	return resourceRedshiftGrantReadImpl(db, d)
-}
-
-func resourceRedshiftGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client)
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	databaseName := getDatabaseName(db, d)
-
-	if err := revokeGrants(tx, databaseName, d); err != nil {
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
+	if !validatePrivileges(model.privileges, objectType) {
+		return fmt.Errorf(`invalid privileges list %+v for object of type %q`, model.privileges, objectType)
 	}
 
 	return nil
 }
 
-func resourceRedshiftGrantRead(db *DBConnection, d *schema.ResourceData) error {
-	return resourceRedshiftGrantReadImpl(db, d)
+func applyGrants(db *DBConnection, model grantResourceModel) error {
+	databaseName := getDatabaseName(db, model)
+
+	tx, err := startTransaction(db.client)
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(tx)
+
+	if err := revokeGrants(tx, databaseName, model); err != nil {
+		return err
+	}
+
+	if err := createGrants(tx, databaseName, model); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("could not commit transaction: %w", err)
+	}
+	return nil
 }
 
-func resourceRedshiftGrantReadImpl(db *DBConnection, d *schema.ResourceData) error {
-	objectType := d.Get(grantObjectTypeAttr).(string)
+func (r *grantResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model grantResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	switch objectType {
-	case "database":
-		return readDatabaseGrants(db, d)
-	case "schema":
-		return readSchemaGrants(db, d)
-	case "table":
-		return readTableGrants(db, d)
-	case "function", "procedure":
-		return readCallableGrants(db, d)
-	case "language":
-		return readLanguageGrants(db, d)
-	default:
-		return fmt.Errorf("unsupported %s: %q", grantObjectTypeAttr, objectType)
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	model.objects = stringsFromSet(ctx, model.Objects, &resp.Diagnostics)
+	model.privileges = stringsFromSet(ctx, model.Privileges, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	err := retryOnPQErrors(ctx, func() error {
+		databaseName := getDatabaseName(db, model)
+
+		tx, err := startTransaction(db.client)
+		if err != nil {
+			return err
+		}
+		defer deferredRollback(tx)
+
+		if err := revokeGrants(tx, databaseName, model); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to revoke the grants", err.Error())
 	}
 }
 
-func readDatabaseGrants(db *DBConnection, d *schema.ResourceData) error {
-	databaseName := getDatabaseName(db, d)
+func (r *grantResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model grantResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	model.objects = stringsFromSet(ctx, model.Objects, &resp.Diagnostics)
+	model.privileges = stringsFromSet(ctx, model.Privileges, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	privileges, err := readGrants(db, model)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to read the grants", err.Error())
+		return
+	}
+
+	// A nil result means there was nothing to read back, in which case the privileges
+	// already in state are kept rather than reported as drift.
+	if privileges != nil {
+		granted, diags := types.SetValueFrom(ctx, types.StringType, privileges)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		model.Privileges = granted
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func readGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
+	objectType := model.ObjectType.ValueString()
+
+	switch objectType {
+	case "database":
+		return readDatabaseGrants(db, model)
+	case "schema":
+		return readSchemaGrants(db, model)
+	case "table":
+		return readTableGrants(db, model)
+	case "function", "procedure":
+		return readCallableGrants(db, model)
+	case "language":
+		return readLanguageGrants(db, model)
+	default:
+		return nil, fmt.Errorf("unsupported %s: %q", grantObjectTypeAttr, objectType)
+	}
+}
+
+func readDatabaseGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
+	databaseName := getDatabaseName(db, model)
 
 	query := `
 SELECT sdp.privilege_type
@@ -247,11 +385,11 @@ WHERE sdp.database_name = $1
 AND sdp.identity_type = $2
 AND sdp.identity_name = $3;`
 
-	return readIdentityPrivileges(db, d, "database", databaseName, query)
+	return readIdentityPrivileges(db, model, "database", databaseName, query)
 }
 
-func readSchemaGrants(db *DBConnection, d *schema.ResourceData) error {
-	schemaName := d.Get(grantSchemaAttr).(string)
+func readSchemaGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
+	schemaName := model.SchemaName.ValueString()
 
 	query := `
 SELECT 
@@ -261,20 +399,20 @@ WHERE ssp.namespace_name = $1
 AND identity_type = $2
 AND identity_name = $3`
 
-	return readIdentityPrivileges(db, d, "schema", schemaName, query)
+	return readIdentityPrivileges(db, model, "schema", schemaName, query)
 }
 
-func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
+func readTableGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
 	log.Printf("[DEBUG] Reading table grants")
 
 	var entityName, query string
 	var queryArgs []interface{}
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
-	databaseName := getDatabaseName(db, d)
-	schemaName := d.Get(grantSchemaAttr).(string)
-	objects := d.Get(grantObjectsAttr).(*schema.Set)
+	isUser := !model.User.IsNull()
+	isGroup := !model.Group.IsNull()
+	isRole := !model.Role.IsNull()
+	databaseName := getDatabaseName(db, model)
+	schemaName := model.SchemaName.ValueString()
+	objects := model.objects
 
 	// The pg_class-based queries below exclude the internal storage tables that
 	// back materialized views (named "mv_tbl__<view>__<n>"). GRANT ... ON ALL
@@ -282,7 +420,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	// intersection permanently missing the granted privilege. The role query
 	// reads from svv_all_tables, which does not surface them.
 	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
+		entityName = model.User.ValueString()
 		query = `
   SELECT
     relname,
@@ -306,7 +444,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
 		}
 	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
+		entityName = model.Group.ValueString()
 		query = `
   SELECT
     relname,
@@ -330,7 +468,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 			pq.Array(grantObjectTypesCodes["table"]), entityName, schemaName,
 		}
 	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
+		entityName = model.Role.ValueString()
 		query = `
   SELECT
     t.table_name,
@@ -357,7 +495,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 		}
 	}
 
-	if isGrantToPublic(d) {
+	if isGrantToPublic(model) {
 		query = `
 		SELECT
 		  relname,
@@ -383,7 +521,7 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -392,85 +530,70 @@ func readTableGrants(db *DBConnection, d *schema.ResourceData) error {
 	// aggregate by intersection: a privilege is reported present only if EVERY
 	// relevant table grants it to the grantee. This reflects the invariant an
 	// "ALL TABLES IN SCHEMA" grant maintains and is independent of row order.
-	var privilegesSet *schema.Set
+	var privileges []string
+	seenTable := false
 	for rows.Next() {
 		var objName string
 		var tableSelect, tableUpdate, tableInsert, tableDelete, tableDrop, tableReferences, tableTruncate, tableAlter bool
 
 		if err := rows.Scan(&objName, &tableSelect, &tableUpdate, &tableInsert, &tableDelete, &tableDrop, &tableReferences, &tableTruncate, &tableAlter); err != nil {
-			return err
+			return nil, err
 		}
 
-		if objects.Len() > 0 && !objects.Contains(objName) {
+		if len(objects) > 0 && !slices.Contains(objects, objName) {
 			continue
 		}
 
-		tablePrivileges := schema.NewSet(schema.HashString, nil)
-		if tableSelect {
-			tablePrivileges.Add("select")
-		}
-		if tableUpdate {
-			tablePrivileges.Add("update")
-		}
-		if tableInsert {
-			tablePrivileges.Add("insert")
-		}
-		if tableDelete {
-			tablePrivileges.Add("delete")
-		}
-		if tableDrop {
-			tablePrivileges.Add("drop")
-		}
-		if tableReferences {
-			tablePrivileges.Add("references")
-		}
-		if tableTruncate {
-			tablePrivileges.Add("truncate")
-		}
-		if tableAlter {
-			tablePrivileges.Add("alter")
-		}
+		var tablePrivileges []string
+		appendIfTrue(tableSelect, "select", &tablePrivileges)
+		appendIfTrue(tableUpdate, "update", &tablePrivileges)
+		appendIfTrue(tableInsert, "insert", &tablePrivileges)
+		appendIfTrue(tableDelete, "delete", &tablePrivileges)
+		appendIfTrue(tableDrop, "drop", &tablePrivileges)
+		appendIfTrue(tableReferences, "references", &tablePrivileges)
+		appendIfTrue(tableTruncate, "truncate", &tablePrivileges)
+		appendIfTrue(tableAlter, "alter", &tablePrivileges)
 
-		if privilegesSet == nil {
-			privilegesSet = tablePrivileges
+		if !seenTable {
+			privileges = tablePrivileges
+			seenTable = true
 		} else {
-			privilegesSet = privilegesSet.Intersection(tablePrivileges)
+			privileges = intersectStrings(privileges, tablePrivileges)
 		}
 
-		log.Printf("[DEBUG] Collected table grants; table: '%v'; privileges: %v; for: %s", objName, tablePrivileges.List(), entityName)
+		log.Printf("[DEBUG] Collected table grants; table: '%v'; privileges: %v; for: %s", objName, tablePrivileges, entityName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	// No in-scope tables were found (empty schema, or none of the named objects
 	// exist). There is nothing to read back, so leave the configured privileges
 	// in state. Reporting an empty set here would be permanent drift that no
 	// apply could resolve, since there are no tables to grant on.
-	if privilegesSet == nil {
-		return nil
+	if !seenTable {
+		return nil, nil
 	}
 
-	if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
-		d.Set(grantPrivilegesAttr, privilegesSet)
-	}
-
-	return nil
+	return privileges, nil
 }
 
-func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
+func readCallableGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
 	log.Printf("[DEBUG] Reading callable grants")
 
 	var entityName, query string
 	var queryArgs []interface{}
 
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
-	schemaName := d.Get(grantSchemaAttr).(string)
-	objectType := d.Get(grantObjectTypeAttr).(string)
+	isUser := !model.User.IsNull()
+	isGroup := !model.Group.IsNull()
+	isRole := !model.Role.IsNull()
+	schemaName := model.SchemaName.ValueString()
+	objectType := model.ObjectType.ValueString()
 
-	databaseName := getDatabaseName(db, d)
+	databaseName := getDatabaseName(db, model)
 
 	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
+		entityName = model.User.ValueString()
 		query = `
 	SELECT
 		proname,
@@ -487,7 +610,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
 		}
 	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
+		entityName = model.Group.ValueString()
 		query = `
 	SELECT
 		proname,
@@ -504,7 +627,7 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 			schemaName, entityName, pq.Array(grantObjectTypesCodes[objectType]),
 		}
 	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
+		entityName = model.Role.ValueString()
 		query = `
 	SELECT
 		p.function_name,
@@ -522,9 +645,9 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 		}
 	}
 
-	callables := stripArgumentsFromCallablesDefinitions(setToStringSlice(d.Get(grantObjectsAttr)))
+	callables := stripArgumentsFromCallablesDefinitions(model.objects)
 
-	if isGrantToPublic(d) {
+	if isGrantToPublic(model) {
 		query = `
 	SELECT
 		proname,
@@ -542,55 +665,46 @@ func readCallableGrants(db *DBConnection, d *schema.ResourceData) error {
 
 	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	contains := func(callables []string, objName string) bool {
-		for _, callable := range callables {
-			if callable == objName {
-				return true
-			}
-		}
-		return false
-	}
-
-	privilegesSet := schema.NewSet(schema.HashString, nil)
+	privileges := []string{}
 	for rows.Next() {
 		var objName string
 		var callableExecute bool
 
 		if err := rows.Scan(&objName, &callableExecute); err != nil {
-			return err
+			return nil, err
 		}
-		if len(callables) > 0 && !contains(callables, objName) {
+		if len(callables) > 0 && !slices.Contains(callables, objName) {
 			continue
 		}
 
-		if callableExecute {
-			privilegesSet.Add("execute")
+		if callableExecute && !slices.Contains(privileges, "execute") {
+			privileges = append(privileges, "execute")
 		}
 	}
-
-	if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
-		d.Set(grantPrivilegesAttr, privilegesSet)
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
+
 	log.Printf("[DEBUG] Reading callable grants - Done")
 
-	return nil
+	return privileges, nil
 }
 
-func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
+func readLanguageGrants(db *DBConnection, model grantResourceModel) ([]string, error) {
 	log.Printf("[DEBUG] Reading language grants")
 
 	var entityName, query string
 
-	_, isUser := d.GetOk(grantUserAttr)
-	_, isGroup := d.GetOk(grantGroupAttr)
-	_, isRole := d.GetOk(grantRoleAttr)
+	isUser := !model.User.IsNull()
+	isGroup := !model.Group.IsNull()
+	isRole := !model.Role.IsNull()
 
 	if isUser {
-		entityName = d.Get(grantUserAttr).(string)
+		entityName = model.User.ValueString()
 		query = `
   SELECT
 		lanname,
@@ -600,7 +714,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
     u.usename=$1
 `
 	} else if isGroup {
-		entityName = d.Get(grantGroupAttr).(string)
+		entityName = model.Group.ValueString()
 		query = `
   SELECT
 		lanname,
@@ -610,7 +724,7 @@ func readLanguageGrants(db *DBConnection, d *schema.ResourceData) error {
     gr.groname=$1
 `
 	} else if isRole {
-		entityName = d.Get(grantRoleAttr).(string)
+		entityName = model.Role.ValueString()
 		query = `
 SELECT
 	p.language_name,
@@ -626,7 +740,7 @@ GROUP BY p.language_name
 	queryArgs := []interface{}{entityName}
 
 	// Handle GRANT TO PUBLIC
-	if isGrantToPublic(d) {
+	if isGrantToPublic(model) {
 		query = `
 		SELECT
 			  lanname,
@@ -638,142 +752,137 @@ GROUP BY p.language_name
 
 	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	objects := d.Get(grantObjectsAttr).(*schema.Set)
+	objects := model.objects
 
 	// Intersection across all in-scope languages, matching readTableGrants:
-	// report a privilege only if every relevant language grants it, then set
-	// state once after the loop.
-	var privilegesSet *schema.Set
+	// report a privilege only if every relevant language grants it.
+	var privileges []string
+	seenLanguage := false
 	for rows.Next() {
 		var objName string
 		var languageUsage bool
 
 		if err := rows.Scan(&objName, &languageUsage); err != nil {
-			return err
+			return nil, err
 		}
 
-		if objects.Len() > 0 && !objects.Contains(objName) {
+		if len(objects) > 0 && !slices.Contains(objects, objName) {
 			continue
 		}
 
-		languagePrivileges := schema.NewSet(schema.HashString, nil)
-		if languageUsage {
-			languagePrivileges.Add("usage")
-		}
+		var languagePrivileges []string
+		appendIfTrue(languageUsage, "usage", &languagePrivileges)
 
-		if privilegesSet == nil {
-			privilegesSet = languagePrivileges
+		if !seenLanguage {
+			privileges = languagePrivileges
+			seenLanguage = true
 		} else {
-			privilegesSet = privilegesSet.Intersection(languagePrivileges)
+			privileges = intersectStrings(privileges, languagePrivileges)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	// No in-scope languages were found: nothing to read back, so leave the
 	// configured privileges in state rather than reporting permanent drift.
-	if privilegesSet == nil {
+	if !seenLanguage {
 		log.Printf("[DEBUG] Reading language grants - Done")
-		return nil
+		return nil, nil
 	}
 
-	if !privilegesSet.Equal(d.Get(grantPrivilegesAttr).(*schema.Set)) {
-		d.Set(grantPrivilegesAttr, privilegesSet)
-	}
 	log.Printf("[DEBUG] Reading language grants - Done")
 
-	return nil
+	return privileges, nil
 }
 
-func readIdentityPrivileges(db *DBConnection, d *schema.ResourceData, objectType, objectName, query string) error {
-	identityType, identityName := getGrantIdentity(d)
+func readIdentityPrivileges(db *DBConnection, model grantResourceModel, objectType, objectName, query string) ([]string, error) {
+	identityType, identityName := getGrantIdentity(model)
 
 	rows, err := db.Query(query, objectName, identityType, identityName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		_ = rows.Close()
 	}()
 
-	var privileges []string
+	privileges := []string{}
 	for rows.Next() {
 		var privilege string
 		if err := rows.Scan(&privilege); err != nil {
-			return err
+			return nil, err
 		}
 		privileges = append(privileges, strings.ToLower(privilege))
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Printf("[DEBUG] Collected %s %q privileges for %s %q: %v", objectType, objectName, identityType, identityName, privileges)
 
-	d.Set(grantPrivilegesAttr, privileges)
-
-	return nil
+	return privileges, nil
 }
 
-func getGrantIdentity(d *schema.ResourceData) (string, string) {
-	if isGrantToPublic(d) {
+func getGrantIdentity(model grantResourceModel) (string, string) {
+	if isGrantToPublic(model) {
 		return "public", "public"
 	}
 
-	if userName, isUser := d.GetOk(grantUserAttr); isUser {
-		return "user", userName.(string)
-	}
-
-	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
-		return "group", groupName.(string)
-	}
-
-	if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
-		return "role", roleName.(string)
+	switch {
+	case !model.User.IsNull():
+		return "user", model.User.ValueString()
+	case !model.Group.IsNull():
+		return "group", model.Group.ValueString()
+	case !model.Role.IsNull():
+		return "role", model.Role.ValueString()
 	}
 
 	return "", ""
 }
 
-func revokeGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
-	query := createGrantsRevokeQuery(d, databaseName)
+func revokeGrants(tx *sql.Tx, databaseName string, model grantResourceModel) error {
+	query := createGrantsRevokeQuery(model, databaseName)
 	_, err := tx.Exec(query)
 	return err
 }
 
-func createGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
-	if d.Get(grantPrivilegesAttr).(*schema.Set).Len() == 0 {
-		log.Printf("[DEBUG] no privileges to grant for %s", d.Get(grantGroupAttr).(string))
+func createGrants(tx *sql.Tx, databaseName string, model grantResourceModel) error {
+	if len(model.privileges) == 0 {
+		log.Printf("[DEBUG] no privileges to grant for %s", model.Group.ValueString())
 		return nil
 	}
 
-	query := createGrantsQuery(d, databaseName)
+	query := createGrantsQuery(model, databaseName)
 	_, err := tx.Exec(query)
 	return err
 }
 
-func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string {
+func createGrantsRevokeQuery(model grantResourceModel, databaseName string) string {
 	var query, toWhomIndicator, entityName string
 
-	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
+	switch {
+	case !model.Group.IsNull():
 		toWhomIndicator = "GROUP"
-		entityName = groupName.(string)
-	} else if userName, isUser := d.GetOk(grantUserAttr); isUser {
-		entityName = userName.(string)
-	} else if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		entityName = model.Group.ValueString()
+	case !model.User.IsNull():
+		entityName = model.User.ValueString()
+	case !model.Role.IsNull():
 		toWhomIndicator = "ROLE"
-		entityName = roleName.(string)
+		entityName = model.Role.ValueString()
 	}
 
 	fromEntityName := pq.QuoteIdentifier(entityName)
-	if isGrantToPublic(d) {
+	if isGrantToPublic(model) {
 		toWhomIndicator = ""
 		fromEntityName = "PUBLIC"
 	}
 
-	switch strings.ToUpper(d.Get(grantObjectTypeAttr).(string)) {
+	switch strings.ToUpper(model.ObjectType.ValueString()) {
 	case "DATABASE":
 		query = fmt.Sprintf(
 			"REVOKE ALL PRIVILEGES ON DATABASE %s FROM %s %s",
@@ -784,50 +893,50 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 	case "SCHEMA":
 		query = fmt.Sprintf(
 			"REVOKE ALL PRIVILEGES ON SCHEMA %s FROM %s %s",
-			pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+			pq.QuoteIdentifier(model.SchemaName.ValueString()),
 			toWhomIndicator,
 			fromEntityName,
 		)
 	case "TABLE":
-		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		objects := model.objects
 		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				setToPgIdentList(objects, d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				setToPgIdentList(objects, model.SchemaName.ValueString()),
 				toWhomIndicator,
 				fromEntityName,
 			)
 		} else {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON ALL %sS IN SCHEMA %s FROM %s %s",
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				pq.QuoteIdentifier(model.SchemaName.ValueString()),
 				toWhomIndicator,
 				fromEntityName,
 			)
 		}
 	case "FUNCTION", "PROCEDURE":
-		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		objects := model.objects
 		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				setToPgIdentListNotQuoted(objects, d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				setToPgIdentListNotQuoted(objects, model.SchemaName.ValueString()),
 				toWhomIndicator,
 				fromEntityName,
 			)
 		} else {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON ALL %sS IN SCHEMA %s FROM %s %s",
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				pq.QuoteIdentifier(model.SchemaName.ValueString()),
 				toWhomIndicator,
 				fromEntityName,
 			)
 		}
 	case "LANGUAGE":
-		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		objects := model.objects
 		query = fmt.Sprintf(
 			"REVOKE USAGE ON LANGUAGE %s FROM %s %s",
 			setToPgIdentList(objects, ""),
@@ -839,30 +948,28 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 	return query
 }
 
-func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
+func createGrantsQuery(model grantResourceModel, databaseName string) string {
 	var query, toWhomIndicator, entityName string
-	var privileges []string
-	for _, p := range d.Get(grantPrivilegesAttr).(*schema.Set).List() {
-		privileges = append(privileges, p.(string))
-	}
+	privileges := model.privileges
 
-	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
+	switch {
+	case !model.Group.IsNull():
 		toWhomIndicator = "GROUP"
-		entityName = groupName.(string)
-	} else if userName, isUser := d.GetOk(grantUserAttr); isUser {
-		entityName = userName.(string)
-	} else if roleName, isRole := d.GetOk(grantRoleAttr); isRole {
+		entityName = model.Group.ValueString()
+	case !model.User.IsNull():
+		entityName = model.User.ValueString()
+	case !model.Role.IsNull():
 		toWhomIndicator = "ROLE"
-		entityName = roleName.(string)
+		entityName = model.Role.ValueString()
 	}
 
 	toEntityName := pq.QuoteIdentifier(entityName)
-	if isGrantToPublic(d) {
+	if isGrantToPublic(model) {
 		toWhomIndicator = ""
 		toEntityName = "PUBLIC"
 	}
 
-	switch strings.ToUpper(d.Get(grantObjectTypeAttr).(string)) {
+	switch strings.ToUpper(model.ObjectType.ValueString()) {
 	case "DATABASE":
 		query = fmt.Sprintf(
 			"GRANT %s ON DATABASE %s TO %s %s",
@@ -875,18 +982,18 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 		query = fmt.Sprintf(
 			"GRANT %s ON SCHEMA %s TO %s %s",
 			strings.Join(privileges, ","),
-			pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+			pq.QuoteIdentifier(model.SchemaName.ValueString()),
 			toWhomIndicator,
 			toEntityName,
 		)
 	case "TABLE", "LANGUAGE":
-		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		objects := model.objects
 		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"GRANT %s ON %s %s TO %s %s",
 				strings.Join(privileges, ","),
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				setToPgIdentList(objects, d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				setToPgIdentList(objects, model.SchemaName.ValueString()),
 				toWhomIndicator,
 				toEntityName,
 			)
@@ -894,20 +1001,20 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 			query = fmt.Sprintf(
 				"GRANT %s ON ALL %sS IN SCHEMA %s TO %s %s",
 				strings.Join(privileges, ","),
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				pq.QuoteIdentifier(model.SchemaName.ValueString()),
 				toWhomIndicator,
 				toEntityName,
 			)
 		}
 	case "FUNCTION", "PROCEDURE":
-		objects := setToStringSlice(d.Get(grantObjectsAttr))
+		objects := model.objects
 		if len(objects) > 0 {
 			query = fmt.Sprintf(
 				"GRANT %s ON %s %s TO %s %s",
 				strings.Join(privileges, ","),
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				setToPgIdentListNotQuoted(objects, d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				setToPgIdentListNotQuoted(objects, model.SchemaName.ValueString()),
 				toWhomIndicator,
 				toEntityName,
 			)
@@ -915,8 +1022,8 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 			query = fmt.Sprintf(
 				"GRANT %s ON ALL %sS IN SCHEMA %s TO %s %s",
 				strings.Join(privileges, ","),
-				strings.ToUpper(d.Get(grantObjectTypeAttr).(string)),
-				pq.QuoteIdentifier(d.Get(grantSchemaAttr).(string)),
+				strings.ToUpper(model.ObjectType.ValueString()),
+				pq.QuoteIdentifier(model.SchemaName.ValueString()),
 				toWhomIndicator,
 				toEntityName,
 			)
@@ -927,54 +1034,44 @@ func createGrantsQuery(d *schema.ResourceData, databaseName string) string {
 	return query
 }
 
-func getDatabaseName(db *DBConnection, d *schema.ResourceData) string {
-	databaseName := db.client.config.Database
-	if database, ok := d.GetOk(grantDatabaseAttr); ok {
-		databaseName = database.(string)
+func getDatabaseName(db *DBConnection, model grantResourceModel) string {
+	if !model.Database.IsNull() && model.Database.ValueString() != "" {
+		return model.Database.ValueString()
 	}
-	return databaseName
+	return db.client.config.Database
 }
 
-func isGrantToPublic(d *schema.ResourceData) bool {
-	if _, isGroup := d.GetOk(grantGroupAttr); isGroup {
-		entityName := d.Get(grantGroupAttr).(string)
-
-		return strings.ToLower(entityName) == grantToPublicName
-	}
-
-	return false
+func isGrantToPublic(model grantResourceModel) bool {
+	return !model.Group.IsNull() && strings.ToLower(model.Group.ValueString()) == grantToPublicName
 }
 
-func generateGrantID(d *schema.ResourceData) string {
+func generateGrantID(model grantResourceModel) string {
 	var parts []string
 
-	if _, isGroup := d.GetOk(grantGroupAttr); isGroup {
-		name := d.Get(grantGroupAttr).(string)
-		if isGrantToPublic(d) {
+	if !model.Group.IsNull() {
+		name := model.Group.ValueString()
+		if isGrantToPublic(model) {
 			name = strings.ToLower(name)
 		}
-
 		parts = append(parts, fmt.Sprintf("gn:%s", name))
 	}
 
-	if _, isUser := d.GetOk(grantUserAttr); isUser {
-		parts = append(parts, fmt.Sprintf("un:%s", d.Get(grantUserAttr).(string)))
+	if !model.User.IsNull() {
+		parts = append(parts, fmt.Sprintf("un:%s", model.User.ValueString()))
 	}
 
-	if _, isRole := d.GetOk(grantRoleAttr); isRole {
-		parts = append(parts, fmt.Sprintf("rn:%s", d.Get(grantRoleAttr).(string)))
+	if !model.Role.IsNull() {
+		parts = append(parts, fmt.Sprintf("rn:%s", model.Role.ValueString()))
 	}
 
-	objectType := fmt.Sprintf("ot:%s", d.Get(grantObjectTypeAttr).(string))
+	objectType := fmt.Sprintf("ot:%s", model.ObjectType.ValueString())
 	parts = append(parts, objectType)
 
 	if objectType != "ot:database" && objectType != "ot:language" {
-		parts = append(parts, d.Get(grantSchemaAttr).(string))
+		parts = append(parts, model.SchemaName.ValueString())
 	}
 
-	for _, object := range d.Get(grantObjectsAttr).(*schema.Set).List() {
-		parts = append(parts, object.(string))
-	}
+	parts = append(parts, model.objects...)
 
 	return strings.Join(parts, "_")
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -197,4 +198,16 @@ func requiresReplaceIfListSizeChanged() planmodifier.List {
 		"Replace the resource when blocks are added or removed",
 		"Replace the resource when blocks are added or removed",
 	)
+}
+
+// intersectStrings returns the values present in both slices, keeping the order of the
+// first one.
+func intersectStrings(first, second []string) []string {
+	shared := []string{}
+	for _, value := range first {
+		if slices.Contains(second, value) {
+			shared = append(shared, value)
+		}
+	}
+	return shared
 }
