@@ -390,7 +390,7 @@ func TestExplicitConfigurationBeatsEnvironment(t *testing.T) {
 			}
 			d := schema.TestResourceDataRaw(t, Provider().Schema, raw)
 
-			config, err := getConfigFromPqResourceData(d, "mydb", 20, nil)
+			config, err := getConfigFromResourceData(d, nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

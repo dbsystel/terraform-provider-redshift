@@ -2,7 +2,6 @@ package redshift
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"regexp"
@@ -271,22 +270,66 @@ func warnOnShadowedPGOptions(d *schema.ResourceData) diag.Diagnostics {
 	}}
 }
 
-func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
-	database := d.Get("database").(string)
-	maxConnections := d.Get("max_connections").(int)
-	_, useDataApiWorkgroup := d.GetOk("data_api.0.workgroup_name")
-	_, useDataApiCluster := d.GetOk("data_api.0.cluster_identifier")
-	useDataApi := useDataApiWorkgroup || useDataApiCluster
-	_, usePqResourceData := d.GetOk("host")
+// settingsFromResourceData reads the provider arguments into a transport-agnostic
+// struct, so that everything downstream is free of the SDK's resource data.
+func settingsFromResourceData(d *schema.ResourceData) (*providerSettings, error) {
+	sessionParameters, err := sessionParametersFromResourceData(d)
+	if err != nil {
+		return nil, err
+	}
 
-	// Defence-in-depth: ConflictsWith in the schema already prevents this at plan time.
-	if useDataApi && usePqResourceData {
-		return nil, fmt.Errorf("using both auth methods 'data_api' and 'host' is not allowed")
+	settings := &providerSettings{
+		Host:              d.Get("host").(string),
+		Username:          d.Get("username").(string),
+		Password:          d.Get("password").(string),
+		Port:              d.Get("port").(int),
+		SSLMode:           d.Get("sslmode").(string),
+		Database:          d.Get("database").(string),
+		MaxConnections:    d.Get("max_connections").(int),
+		ConnectTimeout:    d.Get("connect_timeout").(int),
+		SessionParameters: sessionParameters,
 	}
-	if useDataApi {
-		return getConfigFromDataApiResourceData(d, database)
+
+	if _, ok := d.GetOk("data_api"); ok {
+		settings.DataApi = &dataApiSettings{
+			WorkgroupName:     d.Get("data_api.0.workgroup_name").(string),
+			ClusterIdentifier: d.Get("data_api.0.cluster_identifier").(string),
+			Username:          d.Get("data_api.0.username").(string),
+			Region:            d.Get("data_api.0.region").(string),
+		}
 	}
-	return getConfigFromPqResourceData(d, database, maxConnections, temporaryCredentialsResolver)
+
+	if _, ok := d.GetOk("temporary_credentials"); ok {
+		temporaryCredentialsSettings := &temporaryCredentialsSettings{
+			ClusterIdentifier: d.Get("temporary_credentials.0.cluster_identifier").(string),
+			Region:            d.Get("temporary_credentials.0.region").(string),
+			AutoCreateUser:    d.Get("temporary_credentials.0.auto_create_user").(bool),
+			DurationSeconds:   d.Get("temporary_credentials.0.duration_seconds").(int),
+		}
+		if dbGroups, ok := d.GetOk("temporary_credentials.0.db_groups"); ok {
+			for _, group := range dbGroups.(*schema.Set).List() {
+				temporaryCredentialsSettings.DbGroups = append(temporaryCredentialsSettings.DbGroups, group.(string))
+			}
+		}
+		if _, ok := d.GetOk("temporary_credentials.0.assume_role"); ok {
+			temporaryCredentialsSettings.AssumeRole = &assumeRoleSettings{
+				Arn:         d.Get("temporary_credentials.0.assume_role.0.arn").(string),
+				ExternalID:  d.Get("temporary_credentials.0.assume_role.0.external_id").(string),
+				SessionName: d.Get("temporary_credentials.0.assume_role.0.session_name").(string),
+			}
+		}
+		settings.TemporaryCredentials = temporaryCredentialsSettings
+	}
+
+	return settings, nil
+}
+
+func getConfigFromResourceData(d *schema.ResourceData, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
+	settings, err := settingsFromResourceData(d)
+	if err != nil {
+		return nil, err
+	}
+	return settings.newConfig(temporaryCredentialsResolver)
 }
 
 func assumeRoleSchema() *schema.Schema {

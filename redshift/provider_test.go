@@ -167,7 +167,7 @@ func Test_getConfigFromResourceData(t *testing.T) {
 		d *schema.ResourceData
 	}
 	const tempUsername, tempPassword = "temp-user", "temp-password"
-	fakeTemporaryCredentialsResolver := func(username string, d *schema.ResourceData) (string, string, error) {
+	fakeTemporaryCredentialsResolver := func(username string, s *providerSettings) (string, string, error) {
 		return tempUsername, tempPassword, nil
 	}
 	tests := []struct {
