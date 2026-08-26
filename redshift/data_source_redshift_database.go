@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -121,7 +122,7 @@ LEFT JOIN pg_user_info
 LEFT JOIN svv_datashares
 	ON (svv_redshift_databases.database_name = svv_datashares.consumer_database AND svv_redshift_databases.database_type = 'shared' AND svv_datashares.share_type = 'INBOUND')
 WHERE svv_redshift_databases.database_name = $1
-	`, model.Name.ValueString()).Scan(&id, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
+	`, strings.ToLower(model.Name.ValueString())).Scan(&id, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
 
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read the database", err.Error())
