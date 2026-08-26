@@ -26,4 +26,4 @@ For more information, see [Redshift Roles Documentation](https://docs.aws.amazon
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The role ID.

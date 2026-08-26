@@ -76,8 +76,6 @@ func (d *schemaDataSource) Metadata(_ context.Context, req datasource.MetadataRe
 }
 
 func (d *schemaDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	stringList := schema.ListAttribute{Computed: true, ElementType: types.StringType}
-
 	resp.Schema = schema.Schema{
 		Description: `
 A database contains one or more named schemas. Each schema in a database contains tables and other kinds of named objects. By default, a database has a single schema, which is named PUBLIC. You can use schemas to group database objects under a common name. Schemas are similar to file system directories, except that schemas cannot be nested.
@@ -114,8 +112,8 @@ A database contains one or more named schemas. Each schema in a database contain
 							NestedObject: schema.NestedAttributeObject{
 								Attributes: map[string]schema.Attribute{
 									"region":            schema.StringAttribute{Computed: true, Description: "The AWS Region in which the database is located."},
-									"iam_role_arns":     stringList,
-									"catalog_role_arns": stringList,
+									"iam_role_arns":     iamRoleArnsAttribute("The IAM roles the cluster uses for authentication and authorization."),
+									"catalog_role_arns": iamRoleArnsAttribute("The IAM roles the cluster uses for authentication and authorization for the data catalog."),
 								},
 							},
 						},
@@ -126,7 +124,7 @@ A database contains one or more named schemas. Each schema in a database contain
 								Attributes: map[string]schema.Attribute{
 									"hostname":      schema.StringAttribute{Computed: true, Description: "The hostname of the hive metastore database."},
 									"port":          schema.Int64Attribute{Computed: true, Description: "The port number of the hive metastore."},
-									"iam_role_arns": stringList,
+									"iam_role_arns": iamRoleArnsAttribute("The IAM roles the cluster uses for authentication and authorization."),
 								},
 							},
 						},
@@ -138,7 +136,7 @@ A database contains one or more named schemas. Each schema in a database contain
 									"hostname":      schema.StringAttribute{Computed: true, Description: "The hostname of the head node of the PostgreSQL database replica set."},
 									"port":          schema.Int64Attribute{Computed: true, Description: "The port number of the PostgreSQL database."},
 									"schema":        schema.StringAttribute{Computed: true, Description: "The name of the PostgreSQL schema."},
-									"iam_role_arns": stringList,
+									"iam_role_arns": iamRoleArnsAttribute("The IAM roles the cluster uses for authentication and authorization."),
 									"secret_arn":    schema.StringAttribute{Computed: true, Description: "The ARN of the secret holding the database credentials."},
 								},
 							},
@@ -150,7 +148,7 @@ A database contains one or more named schemas. Each schema in a database contain
 								Attributes: map[string]schema.Attribute{
 									"hostname":      schema.StringAttribute{Computed: true, Description: "The hostname of the head node of the MySQL database replica set."},
 									"port":          schema.Int64Attribute{Computed: true, Description: "The port number of the MySQL database."},
-									"iam_role_arns": stringList,
+									"iam_role_arns": iamRoleArnsAttribute("The IAM roles the cluster uses for authentication and authorization."),
 									"secret_arn":    schema.StringAttribute{Computed: true, Description: "The ARN of the secret holding the database credentials."},
 								},
 							},
@@ -289,4 +287,13 @@ func externalSchemaListValue(ctx context.Context, info *externalSchemaInfo, diag
 	list, diags := types.ListValue(types.ObjectType{AttrTypes: externalSchemaAttributeTypes}, []attr.Value{external})
 	diagnostics.Append(diags...)
 	return list
+}
+
+// iamRoleArnsAttribute describes one of the role lists an external schema is read with.
+func iamRoleArnsAttribute(description string) schema.ListAttribute {
+	return schema.ListAttribute{
+		Computed:    true,
+		ElementType: types.StringType,
+		Description: description,
+	}
 }

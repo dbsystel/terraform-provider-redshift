@@ -36,4 +36,4 @@ resource "redshift_assumerole_grant" "grant" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The assume role grant ID.

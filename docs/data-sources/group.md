@@ -27,5 +27,5 @@ data "redshift_group" "staff" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The group ID.
 - `users` (Set of String) List of the user names who belong to the group
