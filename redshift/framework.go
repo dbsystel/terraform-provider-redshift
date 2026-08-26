@@ -211,3 +211,71 @@ func intersectStrings(first, second []string) []string {
 	}
 	return shared
 }
+
+// scaleInt64 stores the configured value multiplied by factor, which is how the SDK
+// resources kept a value in a different unit in state than in the configuration.
+func scaleInt64(factor int64) planmodifier.Int64 {
+	return scaleInt64PlanModifier{factor: factor}
+}
+
+type scaleInt64PlanModifier struct {
+	factor int64
+}
+
+func (m scaleInt64PlanModifier) Description(_ context.Context) string {
+	return fmt.Sprintf("stores the configured value multiplied by %d", m.factor)
+}
+
+func (m scaleInt64PlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m scaleInt64PlanModifier) PlanModifyInt64(_ context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	resp.PlanValue = types.Int64Value(req.ConfigValue.ValueInt64() * m.factor)
+}
+
+// ignoreChangesAfterCreate keeps the value stored at creation time, for arguments that
+// only have an effect while the resource is created and cannot be read back.
+func ignoreChangesAfterCreate() planmodifier.Bool {
+	return ignoreChangesAfterCreatePlanModifier{}
+}
+
+type ignoreChangesAfterCreatePlanModifier struct{}
+
+func (m ignoreChangesAfterCreatePlanModifier) Description(_ context.Context) string {
+	return "keeps the value stored when the resource was created"
+}
+
+func (m ignoreChangesAfterCreatePlanModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m ignoreChangesAfterCreatePlanModifier) PlanModifyBool(_ context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+	if req.StateValue.IsNull() {
+		return
+	}
+	resp.PlanValue = req.StateValue
+}
+
+// stringsFromList reads a list of strings out of a framework value.
+func stringsFromList(ctx context.Context, list types.List, diagnostics *diag.Diagnostics) []string {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+	var values []string
+	diagnostics.Append(list.ElementsAs(ctx, &values, false)...)
+	return values
+}
+
+// listFromStrings turns a slice into a framework list, using a null list for no values.
+func listFromStrings(ctx context.Context, values []string, diagnostics *diag.Diagnostics) types.List {
+	if len(values) == 0 {
+		return types.ListNull(types.StringType)
+	}
+	list, diags := types.ListValueFrom(ctx, types.StringType, values)
+	diagnostics.Append(diags...)
+	return list
+}

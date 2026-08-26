@@ -377,6 +377,7 @@ func (p *frameworkProvider) Resources(_ context.Context) []func() resource.Resou
 		newDatabaseResource,
 		newGrantResource,
 		newUserResource,
+		newSchemaResource,
 	}
 }
 
@@ -386,6 +387,7 @@ func (p *frameworkProvider) DataSources(_ context.Context) []func() datasource.D
 		newUserDataSource,
 		newGroupDataSource,
 		newDatabaseDataSource,
+		newSchemaDataSource,
 	}
 }
 

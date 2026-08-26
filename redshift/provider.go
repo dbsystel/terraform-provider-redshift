@@ -201,12 +201,8 @@ func Provider() *schema.Provider {
 				},
 			},
 		},
-		ResourcesMap: map[string]*schema.Resource{
-			"redshift_schema": redshiftSchema(),
-		},
-		DataSourcesMap: map[string]*schema.Resource{
-			"redshift_schema": dataSourceRedshiftSchema(),
-		},
+		ResourcesMap:         map[string]*schema.Resource{},
+		DataSourcesMap:       map[string]*schema.Resource{},
 		ConfigureContextFunc: providerConfigure,
 	}
 }
