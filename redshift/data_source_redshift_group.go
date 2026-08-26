@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -76,7 +77,8 @@ func (d *groupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		return
 	}
 
-	groupName := model.Name.ValueString()
+	// pg_group stores the lower-cased group name.
+	groupName := strings.ToLower(model.Name.ValueString())
 	groupID, groupUsers, err := readGroupMembers(db, groupName)
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read the group", err.Error())
