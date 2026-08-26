@@ -3,6 +3,7 @@ package redshift
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -185,7 +186,9 @@ func (d *schemaDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	schemaName := model.Name.ValueString()
+	// Redshift folds identifiers to lower case, so look the schema up under
+	// the name it is actually stored with.
+	schemaName := strings.ToLower(model.Name.ValueString())
 	schemaID, schemaOwner, schemaType, err := readSchemaIDByName(db, schemaName)
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to read the schema", err.Error())
