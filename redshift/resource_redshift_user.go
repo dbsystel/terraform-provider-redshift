@@ -407,10 +407,18 @@ func readUser(ctx context.Context, db *DBConnection, model *userResourceModel, d
 		return false, err
 	}
 
-	sessionParameters, diags := types.MapValueFrom(ctx, types.StringType, parseUserSessionParameters(userConfig))
-	diagnostics.Append(diags...)
-	if diagnostics.HasError() {
-		return true, nil
+	// session_parameters is optional and not computed, so a user without any
+	// session parameters must stay null instead of becoming an empty map, which
+	// would show up as a diff on every plan.
+	parsedSessionParameters := parseUserSessionParameters(userConfig)
+	sessionParameters := types.MapNull(types.StringType)
+	if len(parsedSessionParameters) > 0 || !model.SessionParameters.IsNull() {
+		var diags diag.Diagnostics
+		sessionParameters, diags = types.MapValueFrom(ctx, types.StringType, parsedSessionParameters)
+		diagnostics.Append(diags...)
+		if diagnostics.HasError() {
+			return true, nil
+		}
 	}
 
 	model.Name = types.StringValue(userName)
