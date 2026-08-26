@@ -710,7 +710,9 @@ func (r *schemaResource) refresh(ctx context.Context, db *DBConnection, model *s
 			return false
 		}
 		model.Quota = types.Int64Value(quota)
-		model.ExternalSchema = nil
+		// An absent external_schema block decodes as an empty list, so keep the
+		// refreshed value empty rather than null to avoid a perpetual diff.
+		model.ExternalSchema = []externalSchemaModel{}
 	case "external":
 		info, err := readExternalSchema(db, model.ID.ValueString())
 		if err != nil {
