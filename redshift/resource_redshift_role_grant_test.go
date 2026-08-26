@@ -151,7 +151,7 @@ resource "redshift_role_grant" "combined" {
 }
 
 func testAccCheckRedshiftRoleGrantDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_role_grant" {
@@ -174,7 +174,7 @@ func testAccCheckRedshiftRoleGrantDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftRoleGrantExists(grantToType, entityTo, roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleGrantExists(client, generateRoleGrantID(roleName, grantToType, entityTo))
 		if err != nil {
@@ -191,7 +191,7 @@ func testAccCheckRedshiftRoleGrantExists(grantToType, entityTo, roleName string)
 
 func testAccCheckRedshiftRoleGrantNotExists(grantToType, entityTo, roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleGrantExists(client, generateRoleGrantID(roleName, grantToType, entityTo))
 		if err != nil {

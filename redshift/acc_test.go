@@ -3,9 +3,11 @@
 package redshift
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
@@ -40,4 +42,33 @@ func tfArray(s []string) string {
 
 func generateRandomObjectName(prefix string) string {
 	return strings.ReplaceAll(acctest.RandomWithPrefix(prefix), "-", "_")
+}
+
+var (
+	testAccClientOnce  sync.Once
+	testAccClientValue *Client
+)
+
+// testAccClient is the client the acceptance checks query the cluster with. It is built
+// from the same environment variables the provider itself reads, which is what the
+// checks used to get from the SDK provider's meta value.
+func testAccClient() *Client {
+	testAccClientOnce.Do(func() {
+		model := &frameworkProviderModel{}
+		if os.Getenv("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME") != "" || os.Getenv("REDSHIFT_DATA_API_CLUSTER_IDENTIFIER") != "" {
+			model.DataApi = []frameworkDataApiModel{{}}
+		}
+
+		settings, diags := model.settings(context.Background())
+		if diags.HasError() {
+			panic(fmt.Sprintf("could not read the provider configuration from the environment: %v", diags))
+		}
+
+		config, err := settings.newConfig(temporaryCredentials)
+		if err != nil {
+			panic(fmt.Sprintf("could not build the test client: %v", err))
+		}
+		testAccClientValue = config.NewClient()
+	})
+	return testAccClientValue
 }

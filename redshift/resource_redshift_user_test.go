@@ -574,7 +574,7 @@ resource "unknown_string" "password" {}
 }
 
 func testAccCheckRedshiftUserDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_user" {
@@ -597,7 +597,7 @@ func testAccCheckRedshiftUserDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftUserExists(user string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkUserExists(client, user)
 		if err != nil {

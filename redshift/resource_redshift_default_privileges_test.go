@@ -374,7 +374,7 @@ resource "redshift_default_privileges" "none" {
 
 func testAccCheckDefaultPrivilegesDestory(schemaID, ownerID int, objectType, groupName string) func(*terraform.State) error {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		for _, rs := range s.RootModule().Resources {
 			if rs.Type != "redshift_default_privileges" {

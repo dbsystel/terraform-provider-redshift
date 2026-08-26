@@ -110,7 +110,7 @@ resource "redshift_datashare" "basic" {
 
 func testAccCheckRedshiftDatashareExists(shareName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkDatashareExists(client, shareName)
 		if err != nil {
@@ -145,7 +145,7 @@ func checkDatashareExists(client *Client, shareName string) (bool, error) {
 }
 
 func testAccCheckRedshiftDatashareDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_datashare" {

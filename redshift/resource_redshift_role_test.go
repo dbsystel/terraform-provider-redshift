@@ -102,7 +102,7 @@ name = "%s"
 }
 
 func testAccCheckRedshiftRoleDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_role" {
@@ -125,7 +125,7 @@ func testAccCheckRedshiftRoleDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftRoleExists(roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleExists(client, roleName)
 		if err != nil {

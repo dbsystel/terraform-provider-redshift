@@ -564,7 +564,7 @@ resource "redshift_schema" "redshift" {
 }
 
 func testAccCheckRedshiftSchemaDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_schema" {
@@ -587,7 +587,7 @@ func testAccCheckRedshiftSchemaDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftSchemaExists(schema string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkSchemaExists(client, schema)
 		if err != nil {

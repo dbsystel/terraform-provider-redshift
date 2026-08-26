@@ -342,7 +342,7 @@ resource "redshift_group_membership" "simple" {
 
 func testAccCheckRedshiftGroupMembershipPresence(groupName, userName string, shouldBePresent bool) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkGroupMembershipExists(client, groupName, userName)
 		if err != nil {
@@ -383,7 +383,7 @@ func checkGroupMembershipExists(client *Client, groupName string, userNames ...s
 }
 
 func testAccCheckRedshiftGroupMembershipDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_group_membership" {

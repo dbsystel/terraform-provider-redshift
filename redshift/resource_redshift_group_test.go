@@ -193,7 +193,7 @@ resource "redshift_user" "user2" {
 }
 
 func testAccCheckRedshiftGroupDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_user" {
@@ -216,7 +216,7 @@ func testAccCheckRedshiftGroupDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftGroupExists(user string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkGroupExists(client, user)
 		if err != nil {

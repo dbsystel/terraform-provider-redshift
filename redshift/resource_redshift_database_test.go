@@ -170,7 +170,7 @@ resource "redshift_database" "db" {
 }
 
 func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_database" {
@@ -193,7 +193,7 @@ func testAccCheckRedshiftDatabaseDestroy(s *terraform.State) error {
 
 func testAccCheckDatabaseExists(dbName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkDatabaseExists(client, dbName)
 		if err != nil {

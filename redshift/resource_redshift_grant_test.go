@@ -528,7 +528,7 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 				},
 				{
 					PreConfig: func() {
-						dbClient := testAccProvider.Meta().(*Client)
+						dbClient := testAccClient()
 						conn, err := dbClient.Connect()
 						defer dbClient.Close()
 						if err != nil {
@@ -572,7 +572,7 @@ func TestAccRedshiftGrant_BasicCallables(t *testing.T) {
 				// property, so clean up cannot be performed in the previous one.
 				{
 					PreConfig: func() {
-						dbClient := testAccProvider.Meta().(*Client)
+						dbClient := testAccClient()
 						conn, err := dbClient.Connect()
 						defer dbClient.Close()
 						if err != nil {
@@ -1143,7 +1143,7 @@ resource "redshift_grant" "all_tables" {
 // withAccGrantConn opens a Redshift connection using the configured test
 // provider and runs fn against it, failing the test on any error.
 func withAccGrantConn(t *testing.T, fn func(db *DBConnection) error) {
-	dbClient := testAccProvider.Meta().(*Client)
+	dbClient := testAccClient()
 	conn, err := dbClient.Connect()
 	defer dbClient.Close()
 	if err != nil {
@@ -1158,7 +1158,7 @@ func withAccGrantConn(t *testing.T, fn func(db *DBConnection) error) {
 // privilege on a specific table, read directly from the catalog.
 func testAccCheckUserTablePrivilege(schemaName, table, user, privilege string, want bool) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		dbClient := testAccProvider.Meta().(*Client)
+		dbClient := testAccClient()
 		conn, err := dbClient.Connect()
 		if err != nil {
 			return fmt.Errorf("couldn't connect to redshift: %w", err)
@@ -1184,7 +1184,7 @@ WHERE namespace_name = $2 AND relation_name = $3 AND identity_name = $4 AND iden
 // schema (and its tables) once the Terraform-managed resources are destroyed.
 func testAccRedshiftGrantDropSchema(schemaName string) func(*terraform.State) error {
 	return func(*terraform.State) error {
-		dbClient := testAccProvider.Meta().(*Client)
+		dbClient := testAccClient()
 		conn, err := dbClient.Connect()
 		if err != nil {
 			return fmt.Errorf("couldn't connect to redshift: %w", err)
