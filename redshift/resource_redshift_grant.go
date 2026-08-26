@@ -555,7 +555,10 @@ func readTableGrants(db *DBConnection, model grantResourceModel) ([]string, erro
 		appendIfTrue(tableAlter, "alter", &tablePrivileges)
 
 		if !seenTable {
-			privileges = tablePrivileges
+			// Copy into a non-nil slice: a table granting nothing must stay
+			// distinguishable from the "no in-scope tables" case below, which
+			// alone is signalled by a nil result.
+			privileges = append([]string{}, tablePrivileges...)
 			seenTable = true
 		} else {
 			privileges = intersectStrings(privileges, tablePrivileges)
