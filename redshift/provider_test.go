@@ -368,8 +368,11 @@ func testCalculatedProviderValues(t *testing.T, providerConfig string, expectedE
 func unsetAndSetEnvVars(t *testing.T, envNames ...string) {
 	envKeys := map[string]string{}
 	for _, envName := range envNames {
-		envKeys[envName] = os.Getenv(envName)
-		_ = os.Unsetenv(envName)
+		previousValue := os.Getenv(envName)
+		if previousValue != "" {
+			envKeys[envName] = previousValue
+			_ = os.Unsetenv(envName)
+		}
 	}
 	t.Cleanup(func() {
 		for key, value := range envKeys {
