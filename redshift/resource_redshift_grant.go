@@ -781,7 +781,9 @@ GROUP BY p.language_name
 		appendIfTrue(languageUsage, "usage", &languagePrivileges)
 
 		if !seenLanguage {
-			privileges = languagePrivileges
+			// Non-nil copy, so a language granting nothing stays distinct from
+			// the nil "no in-scope languages" result below.
+			privileges = append([]string{}, languagePrivileges...)
 			seenLanguage = true
 		} else {
 			privileges = intersectStrings(privileges, languagePrivileges)
