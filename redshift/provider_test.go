@@ -11,57 +11,31 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	sdkterraform "github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	redshiftdatasqldriver "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
-var (
-	testAccProtoV6Providers map[string]func() (tfprotov6.ProviderServer, error)
-	testAccProvider         *schema.Provider
-)
+var testAccProtoV6Providers map[string]func() (tfprotov6.ProviderServer, error)
 
 func init() {
-	// testAccProvider stays the very same SDK provider instance that is served to the
-	// tests, so that the checks reaching for its meta value keep working while resources
-	// are migrated to the framework one at a time.
-	testAccProvider = Provider()
 	testAccProtoV6Providers = map[string]func() (tfprotov6.ProviderServer, error){
-		"redshift": func() (tfprotov6.ProviderServer, error) {
-			server, err := muxedProviderServerFor(context.Background(), testAccProvider.GRPCProvider)
-			if err != nil {
-				return nil, err
-			}
-			return server(), nil
-		},
+		"redshift": providerserver.NewProtocol6WithError(New()),
+		// testvalues feeds the provider block values that are only known after apply. It
+		// is still written against terraform-plugin-sdk/v2, which is fine for a helper
+		// that never ships: tf5to6server serves it over the protocol the tests speak.
 		"testvalues": func() (tfprotov6.ProviderServer, error) {
 			provider, err := getTestValuesProvider()
 			if err != nil {
 				return nil, err
 			}
-			return protoV6SDKProviderServer(provider)
+			return tf5to6server.UpgradeServer(context.Background(), provider.GRPCProvider)
 		},
 	}
-}
-
-// protoV6SDKProviderServer serves a helper provider written against the SDK over protocol
-// 6, which is what the muxed provider under test speaks.
-func protoV6SDKProviderServer(provider *schema.Provider) (tfprotov6.ProviderServer, error) {
-	return tf5to6server.UpgradeServer(context.Background(), provider.GRPCProvider)
-}
-
-func TestProvider(t *testing.T) {
-	if err := Provider().InternalValidate(); err != nil {
-		t.Fatalf("err: %s", err)
-	}
-}
-
-func TestProvider_impl(t *testing.T) {
-	var _ = Provider()
 }
 
 func testAccPreCheck(t *testing.T) {
@@ -79,7 +53,10 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
-func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
+// temporaryCredentialsSettingsFromEnv builds the provider settings the temporary
+// credentials acceptance tests connect with, skipping the test when the environment does
+// not describe a cluster to get credentials for.
+func temporaryCredentialsSettingsFromEnv(t *testing.T) *providerSettings {
 	clusterIdentifier := getEnvOrSkip("REDSHIFT_TEMPORARY_CREDENTIALS_CLUSTER_IDENTIFIER", t)
 
 	sdkClient, err := stsClient(t)
@@ -95,26 +72,30 @@ func initTemporaryCredentialsProvider(t *testing.T, provider *schema.Provider) {
 		t.Skip("Unable to get current STS identity. Empty response.")
 	}
 
-	cfg := map[string]interface{}{
-		"temporary_credentials": []interface{}{
-			map[string]interface{}{
-				"cluster_identifier": clusterIdentifier,
-			},
-		},
+	settings, diags := (&frameworkProviderModel{}).settings(context.Background())
+	if diags.HasError() {
+		t.Fatalf("Failed to read the provider configuration from the environment: %v", diags)
 	}
+	settings.Password = ""
+	settings.Username = strings.ToLower(permanentUsername(settings.Username))
+	settings.TemporaryCredentials = &temporaryCredentialsSettings{ClusterIdentifier: clusterIdentifier}
 	if arn, ok := os.LookupEnv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN"); ok {
-		cfg["temporary_credentials"].([]interface{})[0].(map[string]interface{})["assume_role"] = []interface{}{
-			map[string]interface{}{
-				"arn": arn,
-			},
-		}
+		settings.TemporaryCredentials.AssumeRole = &assumeRoleSettings{Arn: arn}
 	}
-	diagnostics := provider.Configure(context.Background(), sdkterraform.NewResourceConfigRaw(cfg))
-	if diagnostics != nil {
-		if diagnostics.HasError() {
-			t.Fatalf("Failed to configure temporary credentials provider: %v", diagnostics)
-		}
+	return settings
+}
+
+// connectWithSettings proves the settings describe a reachable cluster.
+func connectWithSettings(t *testing.T, settings *providerSettings) {
+	config, err := settings.newConfig(temporaryCredentials)
+	if err != nil {
+		t.Fatalf("Unable to build the configuration: %s", err)
 	}
+	db, err := config.NewClient().Connect()
+	if err != nil {
+		t.Fatalf("Unable to connect to database: %s", err)
+	}
+	defer db.Close()
 }
 
 func stsClient(_ *testing.T) (*sts.Client, error) {
@@ -126,91 +107,44 @@ func stsClient(_ *testing.T) (*sts.Client, error) {
 }
 
 func TestAccRedshiftTemporaryCredentials(t *testing.T) {
-	provider := Provider()
-	assumeRoleArn := os.Getenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN")
-	defer os.Setenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN", assumeRoleArn)
-	os.Unsetenv("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN")
-	prepareRedshiftTemporaryCredentialsTestCases(t, provider)
-	client, ok := provider.Meta().(*Client)
-	if !ok {
-		t.Fatal("Unable to initialize client")
-	}
-	db, err := client.Connect()
-	if err != nil {
-		t.Fatalf("Unable to connect to database: %s", err)
-	}
-	defer db.Close()
+	unsetAndSetEnvVars(t, "REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN", "REDSHIFT_PASSWORD")
+	connectWithSettings(t, temporaryCredentialsSettingsFromEnv(t))
 }
 
 func TestAccRedshiftTemporaryCredentialsAssumeRole(t *testing.T) {
 	_ = getEnvOrSkip("REDSHIFT_TEMPORARY_CREDENTIALS_ASSUME_ROLE_ARN", t)
-	provider := Provider()
-	prepareRedshiftTemporaryCredentialsTestCases(t, provider)
-	client, ok := provider.Meta().(*Client)
-	if !ok {
-		t.Fatal("Unable to initialize client")
-	}
-	db, err := client.Connect()
-	if err != nil {
-		t.Fatalf("Unable to connect to database: %s", err)
-	}
-	defer db.Close()
+	unsetAndSetEnvVars(t, "REDSHIFT_PASSWORD")
+	connectWithSettings(t, temporaryCredentialsSettingsFromEnv(t))
 }
 
 func TestAccRedshiftDataApiServerlessConnect(t *testing.T) {
 	_ = getEnvOrSkip("REDSHIFT_DATA_API_SERVERLESS_WORKGROUP_NAME", t)
 	unsetAndSetEnvVars(t, "REDSHIFT_HOST")
-	provider := Provider()
-	provider.Configure(context.Background(), sdkterraform.NewResourceConfigRaw(map[string]interface{}{}))
-	client, ok := provider.Meta().(*Client)
-	if !ok {
-		t.Fatal("Unable to initialize client")
+
+	model := &frameworkProviderModel{DataApi: []frameworkDataApiModel{{}}}
+	settings, diags := model.settings(context.Background())
+	if diags.HasError() {
+		t.Fatalf("Failed to read the provider configuration from the environment: %v", diags)
 	}
-	db, err := client.Connect()
-	if err != nil {
-		t.Fatalf("Unable to connect to database: %s", err)
-	}
-	defer db.Close()
+	connectWithSettings(t, settings)
 }
 
-func prepareRedshiftTemporaryCredentialsTestCases(t *testing.T, provider *schema.Provider) {
-	redshiftPassword := os.Getenv("REDSHIFT_PASSWORD")
-	defer os.Setenv("REDSHIFT_PASSWORD", redshiftPassword)
-	os.Unsetenv("REDSHIFT_PASSWORD")
-	rawUsername := os.Getenv("REDSHIFT_USER")
-	defer os.Setenv("REDSHIFT_USER", rawUsername)
-	username := strings.ToLower(permanentUsername(rawUsername))
-	os.Setenv("REDSHIFT_USER", username)
-	initTemporaryCredentialsProvider(t, provider)
-}
-
-func Test_getConfigFromResourceData(t *testing.T) {
-	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT", "PGOPTIONS")
-	type args struct {
-		d *schema.ResourceData
-	}
+func Test_settingsNewConfig(t *testing.T) {
 	const tempUsername, tempPassword = "temp-user", "temp-password"
 	fakeTemporaryCredentialsResolver := func(username string, s *providerSettings) (string, string, error) {
 		return tempUsername, tempPassword, nil
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    *Config
-		wantErr bool
+		name     string
+		settings *providerSettings
+		want     *Config
+		wantErr  bool
 	}{
 		{
 			"Data API config",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"database": "some-database",
-					"data_api": []interface{}{
-						map[string]interface{}{
-							"workgroup_name": "some-workgroup",
-							"region":         "us-west-2",
-						},
-					},
-				}),
+			&providerSettings{
+				Database: "some-database",
+				DataApi:  &dataApiSettings{WorkgroupName: "some-workgroup", Region: "us-west-2"},
 			},
 			&Config{
 				DriverName: redshiftDataDriverName,
@@ -222,17 +156,9 @@ func Test_getConfigFromResourceData(t *testing.T) {
 		},
 		{
 			"Data API cluster config",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"database": "some-database",
-					"data_api": []interface{}{
-						map[string]interface{}{
-							"cluster_identifier": "some-cluster",
-							"username":           "some-user",
-							"region":             "us-west-2",
-						},
-					},
-				}),
+			&providerSettings{
+				Database: "some-database",
+				DataApi:  &dataApiSettings{ClusterIdentifier: "some-cluster", Username: "some-user", Region: "us-west-2"},
 			},
 			&Config{
 				DriverName: redshiftDataDriverName,
@@ -244,32 +170,33 @@ func Test_getConfigFromResourceData(t *testing.T) {
 		},
 		{
 			"Data API cluster config - missing username",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"database": "some-database",
-					"data_api": []interface{}{
-						map[string]interface{}{
-							"cluster_identifier": "some-cluster",
-							"region":             "us-west-2",
-						},
-					},
-				}),
+			&providerSettings{
+				Database: "some-database",
+				DataApi:  &dataApiSettings{ClusterIdentifier: "some-cluster", Region: "us-west-2"},
+			},
+			nil,
+			true,
+		},
+		{
+			"Data API cluster config - missing region",
+			&providerSettings{
+				Database: "some-database",
+				DataApi:  &dataApiSettings{ClusterIdentifier: "some-cluster", Username: "some-user"},
 			},
 			nil,
 			true,
 		},
 		{
 			"PQ config",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"username":        "some-user",
-					"password":        "some-pw",
-					"host":            "some-host",
-					"port":            4122,
-					"database":        "some-database",
-					"sslmode":         "require",
-					"max_connections": 10,
-				}),
+			&providerSettings{
+				Host:           "some-host",
+				Username:       "some-user",
+				Password:       "some-pw",
+				Port:           4122,
+				SSLMode:        "require",
+				Database:       "some-database",
+				MaxConnections: 10,
+				ConnectTimeout: defaultConnectTimeoutInSeconds,
 			},
 			&Config{
 				DriverName: "postgresql-proxy",
@@ -281,50 +208,46 @@ func Test_getConfigFromResourceData(t *testing.T) {
 		},
 		{
 			"PQ config - fake temporary credentials",
-			args{
-				d: schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
-					"username": "some-user",
-					"host":     "some-host",
-					"port":     4122,
-					"database": "some-database",
-					"sslmode":  "require",
-					"temporary_credentials": []interface{}{
-						map[string]interface{}{
-							"cluster_identifier": "some-cluster",
-						},
-					},
-				}),
+			&providerSettings{
+				Host:                 "some-host",
+				Username:             "some-user",
+				Port:                 4122,
+				SSLMode:              "require",
+				Database:             "some-database",
+				MaxConnections:       defaultProviderMaxOpenConnections,
+				ConnectTimeout:       defaultConnectTimeoutInSeconds,
+				TemporaryCredentials: &temporaryCredentialsSettings{ClusterIdentifier: "some-cluster"},
 			},
 			&Config{
 				DriverName: "postgresql-proxy",
 				ConnStr:    fmt.Sprintf("postgres://%s:%s@some-host:4122/some-database?connect_timeout=180&sslmode=require", tempUsername, tempPassword),
 				Database:   "some-database",
-				MaxConns:   20,
+				MaxConns:   defaultProviderMaxOpenConnections,
 			},
 			false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getConfigFromResourceData(tt.args.d, fakeTemporaryCredentialsResolver)
+			got, err := tt.settings.newConfig(fakeTemporaryCredentialsResolver)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("getConfigFromResourceData() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("newConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				return
 			}
 			if tt.want.ConnStr != got.ConnStr {
-				t.Errorf("getConfigFromResourceData() ConnStr = %q, want %q", got.ConnStr, tt.want.ConnStr)
+				t.Errorf("newConfig() ConnStr = %q, want %q", got.ConnStr, tt.want.ConnStr)
 			}
 			if tt.want.DriverName != got.DriverName {
-				t.Errorf("getConfigFromResourceData() DriverName = %q, want %q", got.DriverName, tt.want.DriverName)
+				t.Errorf("newConfig() DriverName = %q, want %q", got.DriverName, tt.want.DriverName)
 			}
 			if tt.want.MaxConns != got.MaxConns {
-				t.Errorf("getConfigFromResourceData() MaxConns = %d, want %d", got.MaxConns, tt.want.MaxConns)
+				t.Errorf("newConfig() MaxConns = %d, want %d", got.MaxConns, tt.want.MaxConns)
 			}
 			if tt.want.Database != got.Database {
-				t.Errorf("getConfigFromResourceData() Database = %d, want %d", got.MaxConns, tt.want.MaxConns)
+				t.Errorf("newConfig() Database = %q, want %q", got.Database, tt.want.Database)
 			}
 		})
 	}

@@ -15,9 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/redshift"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/hashicorp/go-cty/cty"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	_ "github.com/lib/pq"
 )
 
@@ -94,25 +91,6 @@ func (s *providerSettings) pqConfig(temporaryCredentialsResolver temporaryCreden
 	return NewPqConfig(s.Host, s.Database, username, password, s.Port, s.SSLMode, s.MaxConnections, s.ConnectTimeout, s.SessionParameters), nil
 }
 
-// sessionParametersFromResourceData reads and validates the `session_parameters` provider
-// argument.
-func sessionParametersFromResourceData(d *schema.ResourceData) (map[string]string, error) {
-	raw, ok := d.GetOk("session_parameters")
-	if !ok {
-		return nil, nil
-	}
-
-	sessionParameters := map[string]string{}
-	for name, value := range raw.(map[string]interface{}) {
-		stringValue := value.(string)
-		if err := validateSessionParameter(name, stringValue); err != nil {
-			return nil, err
-		}
-		sessionParameters[name] = stringValue
-	}
-	return sessionParameters, nil
-}
-
 func validateSessionParameter(name, value string) error {
 	if err := validateSessionParameterName(name); err != nil {
 		return err
@@ -121,33 +99,6 @@ func validateSessionParameter(name, value string) error {
 		return fmt.Errorf("invalid value %q for session parameter %q: only letters, digits and the characters _.,:/@+- are allowed", value, name)
 	}
 	return nil
-}
-
-// validateSessionParameters reports invalid parameters during validation rather than
-// waiting until the provider is configured, so that the diagnostic carries the attribute
-// path and `terraform validate` rejects the configuration.
-func validateSessionParameters(value interface{}, path cty.Path) diag.Diagnostics {
-	sessionParameters, ok := value.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	var diags diag.Diagnostics
-	for name, raw := range sessionParameters {
-		stringValue, isString := raw.(string)
-		if !isString {
-			continue
-		}
-		if err := validateSessionParameter(name, stringValue); err != nil {
-			diags = append(diags, diag.Diagnostic{
-				Severity:      diag.Error,
-				Summary:       "Invalid session parameter",
-				Detail:        err.Error(),
-				AttributePath: append(path, cty.IndexStep{Key: cty.StringVal(name)}),
-			})
-		}
-	}
-	return diags
 }
 
 // temporaryCredentials gets temporary credentials using GetClusterCredentials

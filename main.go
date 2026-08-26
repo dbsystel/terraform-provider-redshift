@@ -5,20 +5,16 @@ import (
 	"log"
 
 	"github.com/dbsystel/terraform-provider-redshift/redshift"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6/tf6server"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
 //go:generate go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --providers-schema schema.json
 
 func main() {
-	ctx := context.Background()
-
-	provider, err := redshift.MuxedProviderServer(ctx)
+	err := providerserver.Serve(context.Background(), redshift.New, providerserver.ServeOpts{
+		Address: "registry.opentofu.org/dbsystel/redshift",
+	})
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := tf6server.Serve("registry.opentofu.org/dbsystel/redshift", provider); err != nil {
 		log.Fatal(err)
 	}
 }

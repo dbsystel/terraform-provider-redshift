@@ -1,18 +1,13 @@
 package redshift
 
 import (
-	"context"
 	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/lib/pq"
 )
 
@@ -67,40 +62,6 @@ func pqQuoteLiteral(in string) string {
 func getUserIDFromName(tx *sql.Tx, user string) (userID int, err error) {
 	err = tx.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
 	return
-}
-
-func ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(context.Context, *schema.ResourceData, interface{}) diag.Diagnostics {
-	return func(_ context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-		client := meta.(*Client)
-
-		db, err := client.Connect()
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		return diag.FromErr(fn(db, d))
-	}
-}
-
-const resourceRetryAttempts = 10
-
-func ResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
-	return func(db *DBConnection, d *schema.ResourceData) error {
-		for i := 0; i < resourceRetryAttempts; i++ {
-			err := fn(db, d)
-			if err == nil {
-				return nil
-			}
-
-			var pqErr *pq.Error
-			if !errors.As(err, &pqErr) || !isRetryablePQError(string(pqErr.Code)) {
-				return err
-			}
-
-			time.Sleep(time.Duration(i+1) * time.Second)
-		}
-		return nil
-	}
 }
 
 func isRetryablePQError(code string) bool {
@@ -224,14 +185,4 @@ func stripArgumentsFromCallablesDefinitions(defs []string) []string {
 		names[i] = strings.Split(def, "(")[0]
 	}
 	return names
-}
-
-// setToStringSlice reads a schema.TypeSet of strings out of the resource data.
-func setToStringSlice(raw interface{}) []string {
-	elements := raw.(*schema.Set).List()
-	values := make([]string, len(elements))
-	for i, element := range elements {
-		values[i] = element.(string)
-	}
-	return values
 }

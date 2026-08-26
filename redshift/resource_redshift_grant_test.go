@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	tfschema "github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -789,19 +788,9 @@ func testAccRedshiftGrantRegressionIssue43CompareIds(addr1 string, addr2 string)
 	}
 }
 
+// The generated ID lists the objects in the order they are configured in.
 func testAccRedshiftGrantObjectSetID(objects ...string) string {
-	setItems := make([]interface{}, len(objects))
-	for i, object := range objects {
-		setItems[i] = object
-	}
-
-	set := tfschema.NewSet(tfschema.HashString, setItems)
-	orderedObjects := make([]string, 0, len(objects))
-	for _, object := range set.List() {
-		orderedObjects = append(orderedObjects, object.(string))
-	}
-
-	return strings.Join(orderedObjects, "_")
+	return strings.Join(objects, "_")
 }
 
 func testAccRedshiftGrantBasicCallablesConfigUserGroup(username, group, _ string) string {

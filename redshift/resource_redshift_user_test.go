@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -557,7 +558,9 @@ resource "unknown_string" "password" {}
 	}
 
 	providers := map[string]func() (tfprotov6.ProviderServer, error){
-		"unknown":  func() (tfprotov6.ProviderServer, error) { return protoV6SDKProviderServer(unknownProvider) },
+		"unknown": func() (tfprotov6.ProviderServer, error) {
+			return tf5to6server.UpgradeServer(context.Background(), unknownProvider.GRPCProvider)
+		},
 		"redshift": testAccProtoV6Providers["redshift"],
 	}
 

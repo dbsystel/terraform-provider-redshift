@@ -23,10 +23,32 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// frameworkProvider serves the parts of the provider that have been migrated to
-// terraform-plugin-framework. It is muxed with the terraform-plugin-sdk/v2 provider in
-// Provider(), which still serves everything else, so both must describe the exact same
-// provider configuration: the mux rejects servers whose provider schemas differ.
+const (
+	defaultProviderMaxOpenConnections                      = 20
+	defaultTemporaryCredentialsAssumeRoleDurationInSeconds = 900
+	defaultConnectTimeoutInSeconds                         = 180
+)
+
+// connectTimeoutDefault resolves the default from PGCONNECT_TIMEOUT, the variable libpq
+// itself reads. A value that is not a non-negative integer falls back to the built-in
+// default rather than failing: the argument is also present for Data API configurations,
+// which never open a libpq connection and must not be broken by an unrelated variable in
+// the environment. lib/pq reports the bad value, naming the variable, if a libpq
+// connection is actually made.
+func connectTimeoutDefault() int {
+	raw := os.Getenv("PGCONNECT_TIMEOUT")
+	if raw == "" {
+		return defaultConnectTimeoutInSeconds
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		log.Printf("[WARN] ignoring PGCONNECT_TIMEOUT value %q: not a non-negative integer", raw)
+		return defaultConnectTimeoutInSeconds
+	}
+	return seconds
+}
+
+// frameworkProvider is the provider, served over protocol 6.
 type frameworkProvider struct{}
 
 var _ provider.Provider = &frameworkProvider{}
@@ -273,12 +295,7 @@ func (p *frameworkProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	if len(settings.SessionParameters) > 0 && os.Getenv("PGOPTIONS") != "" {
-		resp.Diagnostics.AddWarning(
-			"PGOPTIONS is ignored",
-			"The provider's `session_parameters` argument is set, which overrides the PGOPTIONS environment variable in its entirety. Move any settings you still need from PGOPTIONS into `session_parameters`.",
-		)
-	}
+	resp.Diagnostics.Append(warnOnShadowedPGOptions(settings.SessionParameters)...)
 
 	config, err := settings.newConfig(temporaryCredentials)
 	if err != nil {
@@ -299,7 +316,6 @@ func (p *frameworkProvider) Configure(ctx context.Context, req provider.Configur
 func (m *frameworkProviderModel) settings(ctx context.Context) (*providerSettings, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	connectTimeoutRaw, _ := connectTimeoutDefault()
 	settings := &providerSettings{
 		Host:           stringWithEnvDefault(m.Host, "", "REDSHIFT_HOST"),
 		Username:       stringWithEnvDefault(m.Username, "root", "REDSHIFT_USER"),
@@ -308,7 +324,7 @@ func (m *frameworkProviderModel) settings(ctx context.Context) (*providerSetting
 		SSLMode:        stringWithEnvDefault(m.SSLMode, "require", "REDSHIFT_SSLMODE"),
 		Database:       stringWithEnvDefault(m.Database, "redshift", "REDSHIFT_DATABASE"),
 		MaxConnections: int64WithEnvDefault(m.MaxConnections, defaultProviderMaxOpenConnections),
-		ConnectTimeout: int64WithEnvDefault(m.ConnectTimeout, connectTimeoutRaw.(int)),
+		ConnectTimeout: int64WithEnvDefault(m.ConnectTimeout, connectTimeoutDefault()),
 	}
 
 	if !m.SessionParameters.IsNull() {
@@ -464,4 +480,20 @@ func dbGroupValidators() []validator.String {
 		stringvalidator.RegexMatches(regexp.MustCompile(`^[^:/]*$`), "Must not contain ':' or '/'."),
 		stringvalidator.NoneOfCaseInsensitive(reservedWords...),
 	}
+}
+
+// warnOnShadowedPGOptions reports that PGOPTIONS is being discarded. Session parameters
+// are sent as the libpq `options` connection parameter, which takes precedence over the
+// environment variable of the same meaning, so a user setting both silently loses the
+// settings from their environment.
+func warnOnShadowedPGOptions(sessionParameters map[string]string) diag.Diagnostics {
+	if len(sessionParameters) == 0 || os.Getenv("PGOPTIONS") == "" {
+		return nil
+	}
+	var diags diag.Diagnostics
+	diags.AddWarning(
+		"PGOPTIONS is ignored",
+		"The provider's `session_parameters` argument is set, which overrides the PGOPTIONS environment variable in its entirety. Move any settings you still need from PGOPTIONS into `session_parameters`.",
+	)
+	return diags
 }

@@ -113,6 +113,9 @@ func (m normalizeStringPlanModifier) PlanModifyString(_ context.Context, req pla
 	resp.PlanValue = types.StringValue(m.normalize(req.ConfigValue.ValueString()))
 }
 
+// resourceRetryAttempts is how often an operation is retried before giving up.
+const resourceRetryAttempts = 10
+
 // retryOnPQErrors retries an operation that failed with one of the Redshift errors that
 // concurrent operations produce spuriously. It is the framework counterpart of
 // ResourceRetryOnPQErrors, and unlike it reports the last error instead of swallowing it.
