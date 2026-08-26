@@ -379,7 +379,9 @@ WHERE pg_database_info.datid = $1
 			WithPermissions: withPermissions,
 		}}
 	} else {
-		model.DatashareSource = nil
+		// An absent datashare_source block decodes as an empty list, so keep the
+		// refreshed value empty rather than null to avoid a perpetual diff.
+		model.DatashareSource = []databaseDatashareSourceModel{}
 	}
 
 	return true
