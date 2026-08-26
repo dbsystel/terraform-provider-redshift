@@ -4,7 +4,7 @@
 
 ## What this is
 
-A Terraform/OpenTofu provider for AWS Redshift, managing users, groups, schemas, grants, datashares, roles, etc. Published on the OpenTofu Registry as `dbsystel/redshift`. Built with `terraform-plugin-sdk/v2`. All provider code lives in the `redshift/` package; `main.go` just wires it into the plugin SDK server.
+A Terraform/OpenTofu provider for AWS Redshift, managing users, groups, schemas, grants, datashares, roles, etc. Published on the OpenTofu Registry as `dbsystel/redshift`. Built with `terraform-plugin-framework` (protocol 6). All provider code lives in the `redshift/` package; `main.go` just serves it.
 
 ## Commands
 
@@ -19,7 +19,7 @@ A Terraform/OpenTofu provider for AWS Redshift, managing users, groups, schemas,
 
 ### Two connection transports, one `Config`/`Client` abstraction
 
-The provider talks to Redshift through one of two interchangeable transports, selected in `provider.go`'s `getConfigFromResourceData` based on whether `data_api` is set in the resource config:
+The provider talks to Redshift through one of two interchangeable transports, selected in `config.go`'s `providerSettings.newConfig` based on whether `data_api` is set in the provider configuration:
 
 - **libpq/proxy** (`config_pq_proxy.go`, `proxy_driver.go`) — a real Postgres wire-protocol connection via `github.com/lib/pq`, registered under driver name `postgresql-proxy` (`proxy_driver.go`). Wraps `pq` to support `ALL_PROXY`/SOCKS dialing for clusters only reachable from inside a VPC. Handles `temporary_credentials` (via `redshift:GetClusterCredentials`) and `session_parameters` (sent as the libpq `options` param, which silently overrides `PGOPTIONS`).
 - **Data API** (`config_data_api.go`) — uses `github.com/mmichaelb/redshift-data-sql-driver` (driver name `redshift-data`) to talk to Redshift via the AWS Redshift Data API instead of a direct connection. No pooling (`maxConns` is always 1). Transactions are emulated as a sequence of individual statements, not real DB transactions — see the caveats in README.md if touching transactional behavior here.
@@ -28,25 +28,29 @@ Both paths converge on `NewConfig(driverName, connStr, database, maxConns)` in `
 
 ### Connection lifecycle (`config.go`)
 
-`Client.Connect()` is the single entry point every resource/data-source op uses to get a `*DBConnection` (a `*sql.DB` wrapper). It's called concurrently — Terraform runs CRUD operations for different resources in parallel (`-parallelism`), all sharing one `*Client` set as the SDK's `meta`.
+`Client.Connect()` is the single entry point every resource/data-source op uses to get a `*DBConnection` (a `*sql.DB` wrapper). It's called concurrently — Terraform runs CRUD operations for different resources in parallel (`-parallelism`), all sharing the one `*Client` the provider hands out in `Configure`.
 
 - A package-level `dbRegistry map[string]*DBConnection` caches one `*DBConnection` per DSN, guarded by `dbRegistryLock`. A second map, `dbConnectLocks`, holds a `*sync.Mutex` per DSN so that establishing a *new* connection for one DSN never blocks concurrent `Connect()` calls for a *different* DSN — only same-DSN callers serialize (and de-dupe: the first one to acquire the per-DSN lock does the real work, the rest hit the now-populated cache).
 - `dbRegistryLock` itself is only ever held for a map read or write — never across `sql.Open`/network I/O.
 - Cache hits are returned without any liveness probe (no `Ping`). This relies on `db.SetMaxIdleConns(0)` (set when a connection is first established) — the pool never holds an idle connection, so every real use redials fresh and a dead cluster surfaces as a normal query error to the caller. If `MaxIdleConns` is ever raised above 0, this reasoning breaks and a liveness check would need to come back.
 - `Config.GetUsername` memoizes the connected user (`SELECT current_user`) per `Config` via its own `usernameRetrievalMutex`, independent of the connection registry.
 
-### Resource wiring (`helpers.go`)
+### Resource wiring (`framework.go`, `helpers.go`)
 
-`ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error)` adapts the simpler `(*DBConnection, *schema.ResourceData) error` signature used throughout `resource_redshift_*.go`/`data_source_redshift_*.go` into the SDK's `CreateContext`/`ReadContext`/etc. signature, calling `client.Connect()` internally. Nearly every resource's CRUD functions are registered through this wrapper — start here when tracing how a resource operation reaches the database.
+Every resource and data source embeds `frameworkClient` (`framework.go`): `Configure` stores the `*Client` the provider handed out, and `connect(&resp.Diagnostics)` opens a connection from it, reporting failures as diagnostics. Start there when tracing how a resource operation reaches the database.
 
-`startTransaction(client)` similarly wraps `client.Connect()` + `db.Begin()` for code paths that need a real `*sql.Tx` (only meaningful on the libpq/proxy transport, since Data API transactions aren't real transactions).
+`framework.go` also holds the shared schema behaviour: `normalizeString`/`normalizeSet` (store a normalized form of the configured value), `scaleInt64`, `ignoreChangesAfterCreate`, `requiresReplaceIfListSizeChanged`, `regexDoesNotMatch`, and the small helpers that convert framework values to and from Go slices and maps.
 
-`ResourceRetryOnPQErrors` retries an operation (default 10x with increasing backoff) on specific retryable Postgres error codes (deadlock, concurrent update, etc.) — used to wrap `DeleteContext` in several resources where Redshift's concurrency model produces spurious conflicts.
+`startTransaction(client)` (`helpers.go`) wraps `client.Connect()` + `db.Begin()` for code paths that need a real `*sql.Tx` (only meaningful on the libpq/proxy transport, since Data API transactions aren't real transactions).
 
-### Provider schema (`provider.go`)
+`retryOnPQErrors` retries an operation (10x with increasing backoff, honouring the context) on specific retryable Postgres error codes (deadlock, concurrent update, etc.) — used in `Delete` in several resources where Redshift's concurrency model produces spurious conflicts.
 
-The three mutually-exclusive connection methods (`host`+`password`/`temporary_credentials`, `data_api`) are enforced via `ConflictsWith` in the schema, plus a defence-in-depth check in `getConfigFromResourceData`. When adding a new provider-level argument, check whether it's meaningful for both transports — several existing arguments (`connect_timeout`, `sslmode`, `port`) are libpq-only but deliberately don't `ConflictsWith` `data_api`, since their `DefaultFunc` always returns a value and the SDK would otherwise report a false conflict for every Data API user.
+### Provider schema (`fwprovider.go`)
+
+The three mutually-exclusive connection methods (`host`+`password`/`temporary_credentials`, `data_api`) are enforced with `ConflictsWith` validators, plus a defence-in-depth check in `providerSettings.newConfig`. The framework has no `DefaultFunc`, so environment variable defaults are resolved in `Configure` through `stringWithEnvDefault`/`int64WithEnvDefault`; `settings()` turns the provider model into the transport-agnostic `providerSettings`. When adding a new provider-level argument, check whether it's meaningful for both transports — `connect_timeout`, `sslmode` and `port` are libpq-only and simply unused by the Data API transport.
 
 ### Resource file structure
 
-Each `resource_redshift_*.go` / `data_source_redshift_*.go` follows the same shape: a `schema.Resource` returned from a `redshiftXxx()` constructor, `*Attr` constants for schema keys, CRUD functions taking `(*DBConnection, *schema.ResourceData) error`, and raw SQL built with `pqQuoteLiteral`/`pq.QuoteIdentifier` (never string-interpolated user input directly). `validation.go` holds shared `ValidateFunc`/`ValidateDiagFunc` helpers; `custom_diff.go` holds shared `CustomizeDiffFunc` helpers (currently just `forceNewIfListSizeChanged`).
+Each `resource_redshift_*.go` / `data_source_redshift_*.go` follows the same shape: a `newXxxResource()`/`newXxxDataSource()` constructor registered in `fwprovider.go`, a struct embedding `frameworkClient`, a `xxxResourceModel` with `tfsdk:` tags, `*Attr` constants for schema keys, `Metadata`/`Schema`/`Configure` and the CRUD methods, and raw SQL built with `pqQuoteLiteral`/`pq.QuoteIdentifier` (never string-interpolated user input directly). Every resource declares its own `id` attribute: the framework adds none.
+
+Create and Update store the planned values and resolve what the plan left unknown; reading back from the cluster in the same operation would risk the framework's plan and apply consistency check. `Read` is where state is refreshed from the cluster. `validation.go` holds the shared regular expressions and reserved words.
