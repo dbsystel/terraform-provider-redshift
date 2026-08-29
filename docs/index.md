@@ -82,7 +82,7 @@ provider "redshift" {
 ### Optional
 
 - `connect_timeout` (Number) Maximum wait for a connection to be established, in seconds. This covers the TCP connection, TLS negotiation and authentication handshake, but not the execution of individual statements. Zero applies no timeout, leaving the operating system to give up on the TCP connection in its own time. Unused when connecting via the Data API.
-- `data_api` (Block List, Max: 1) Configuration for using the Redshift Data API. Supports both serverless workgroups and provisioned clusters. (see [below for nested schema](#nestedblock--data_api))
+- `data_api` (Block List) Configuration for using the Redshift Data API. Supports both serverless workgroups and provisioned clusters. (see [below for nested schema](#nestedblock--data_api))
 - `database` (String) The name of the database to connect to. The default is `redshift`.
 - `host` (String) Name of Redshift server address to connect to.
 - `max_connections` (Number) Maximum number of connections to establish to the database. Zero means unlimited.
@@ -90,19 +90,16 @@ provider "redshift" {
 - `port` (Number) The Redshift port number to connect to at the server host.
 - `session_parameters` (Map of String) A map of session configuration parameters to apply to every connection the provider opens, sent using the libpq `options` connection parameter. Values are passed to Redshift unaltered and so use its own units. This map replaces the `PGOPTIONS` environment variable rather than merging with it. Parameter names may only contain lowercase letters, digits and underscores, and values only letters, digits and the characters `_.,:/@+-`. Cannot be combined with `data_api`, which opens a new session for each statement. See the [Amazon Redshift configuration reference](https://docs.aws.amazon.com/redshift/latest/dg/cm_chap_ConfigurationRef.html) for the list of valid parameters.
 - `sslmode` (String) This option determines whether or with what priority a secure SSL TCP/IP connection will be negotiated with the Redshift server. Valid values are `require` (default, always SSL, also skip verification), `verify-ca` (always SSL, verify that the certificate presented by the server was signed by a trusted CA), `verify-full` (always SSL, verify that the certification presented by the server was signed by a trusted CA and the server host name matches the one in the certificate), `disable` (no SSL).
-- `temporary_credentials` (Block List, Max: 1) Configuration for obtaining a temporary password using redshift:GetClusterCredentials (see [below for nested schema](#nestedblock--temporary_credentials))
+- `temporary_credentials` (Block List) Configuration for obtaining a temporary password using redshift:GetClusterCredentials (see [below for nested schema](#nestedblock--temporary_credentials))
 - `username` (String) Redshift user name to connect as.
 
 <a id="nestedblock--data_api"></a>
 ### Nested Schema for `data_api`
 
-Required:
-
-- `region` (String) The AWS region where the Redshift workgroup or cluster is located.
-
 Optional:
 
 - `cluster_identifier` (String) The identifier of the provisioned Redshift cluster to connect to.
+- `region` (String) The AWS region where the Redshift workgroup or cluster is located.
 - `username` (String) The database user to connect as. Required at apply time when cluster_identifier is set.
 - `workgroup_name` (String) The name of the Redshift Serverless workgroup to connect to.
 
@@ -116,7 +113,7 @@ Required:
 
 Optional:
 
-- `assume_role` (Block List, Max: 1) Optional assume role data used to obtain temporary credentials (see [below for nested schema](#nestedblock--temporary_credentials--assume_role))
+- `assume_role` (Block List) Optional assume role data used to obtain temporary credentials (see [below for nested schema](#nestedblock--temporary_credentials--assume_role))
 - `auto_create_user` (Boolean) Create a database user with the name specified for the user if one does not exist.
 - `db_groups` (Set of String) A list of the names of existing database groups that the user will join for the current session, in addition to any group memberships for an existing user. If not specified, a new user is added only to PUBLIC.
 - `duration_seconds` (Number) The number of seconds until the returned temporary password expires.

@@ -7,17 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftGroup_Basic(t *testing.T) {
 	// todo: use dynamic names for groups
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftGroupConfig,
@@ -88,9 +88,9 @@ func TestAccRedshiftGroup_Update(t *testing.T) {
 		}
 		`, userName1, userName2, userName3, groupNameUpdated)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      testAccCheckRedshiftGroupDestroy,
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             testAccCheckRedshiftGroupDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: configCreate,
@@ -165,9 +165,9 @@ resource "redshift_user" "user2" {
 }
 `, groupName, userName1, userName2)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -193,7 +193,7 @@ resource "redshift_user" "user2" {
 }
 
 func testAccCheckRedshiftGroupDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_user" {
@@ -216,7 +216,7 @@ func testAccCheckRedshiftGroupDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftGroupExists(user string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkGroupExists(client, user)
 		if err != nil {

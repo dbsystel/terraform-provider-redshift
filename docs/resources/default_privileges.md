@@ -46,4 +46,4 @@ resource "redshift_default_privileges" "user" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The default privileges ID.

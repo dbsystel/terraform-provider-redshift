@@ -50,13 +50,13 @@ resource "redshift_database" "datashare_db" {
 ### Optional
 
 - `connection_limit` (Number) The maximum number of concurrent connections that can be made to this database. A value of -1 means no limit.
-- `datashare_source` (Block List, Max: 1) Configuration for creating a database from a redshift datashare. (see [below for nested schema](#nestedblock--datashare_source))
+- `datashare_source` (Block List) Configuration for creating a database from a redshift datashare. (see [below for nested schema](#nestedblock--datashare_source))
 - `owner` (String) Owner of the database, usually the user who created it
-- `zeroetl_integration` (Block List, Max: 1) Configuration for creating a database from a zero ETL integration. (see [below for nested schema](#nestedblock--zeroetl_integration))
+- `zeroetl_integration` (Block List) Configuration for creating a database from a zero ETL integration. (see [below for nested schema](#nestedblock--zeroetl_integration))
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The database ID.
 
 <a id="nestedblock--datashare_source"></a>
 ### Nested Schema for `datashare_source`

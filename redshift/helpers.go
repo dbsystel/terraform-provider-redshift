@@ -1,18 +1,13 @@
 package redshift
 
 import (
-	"context"
 	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/lib/pq"
 )
 
@@ -67,38 +62,6 @@ func pqQuoteLiteral(in string) string {
 func getUserIDFromName(tx *sql.Tx, user string) (userID int, err error) {
 	err = tx.QueryRow("SELECT usesysid FROM pg_user WHERE usename = $1", user).Scan(&userID)
 	return
-}
-
-func ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(context.Context, *schema.ResourceData, interface{}) diag.Diagnostics {
-	return func(_ context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-		client := meta.(*Client)
-
-		db, err := client.Connect()
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		return diag.FromErr(fn(db, d))
-	}
-}
-
-func ResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
-	return func(db *DBConnection, d *schema.ResourceData) error {
-		for i := 0; i < 10; i++ {
-			err := fn(db, d)
-			if err == nil {
-				return nil
-			}
-
-			var pqErr *pq.Error
-			if !errors.As(err, &pqErr) || !isRetryablePQError(string(pqErr.Code)) {
-				return err
-			}
-
-			time.Sleep(time.Duration(i+1) * time.Second)
-		}
-		return nil
-	}
 }
 
 func isRetryablePQError(code string) bool {
@@ -189,13 +152,13 @@ func appendIfTrue(condition bool, item string, list *[]string) {
 	}
 }
 
-func setToPgIdentList(identifiers *schema.Set, prefix string) string {
-	quoted := make([]string, identifiers.Len())
-	for i, identifier := range identifiers.List() {
+func setToPgIdentList(identifiers []string, prefix string) string {
+	quoted := make([]string, len(identifiers))
+	for i, identifier := range identifiers {
 		if prefix == "" {
-			quoted[i] = pq.QuoteIdentifier(identifier.(string))
+			quoted[i] = pq.QuoteIdentifier(identifier)
 		} else {
-			quoted[i] = fmt.Sprintf("%s.%s", pq.QuoteIdentifier(prefix), pq.QuoteIdentifier(identifier.(string)))
+			quoted[i] = fmt.Sprintf("%s.%s", pq.QuoteIdentifier(prefix), pq.QuoteIdentifier(identifier))
 		}
 	}
 
@@ -203,27 +166,23 @@ func setToPgIdentList(identifiers *schema.Set, prefix string) string {
 }
 
 // Quoted identifiers somehow does not work for grants/revokes on functions and procedures
-func setToPgIdentListNotQuoted(identifiers *schema.Set, prefix string) string {
-	quoted := make([]string, identifiers.Len())
-	for i, identifier := range identifiers.List() {
+func setToPgIdentListNotQuoted(identifiers []string, prefix string) string {
+	quoted := make([]string, len(identifiers))
+	for i, identifier := range identifiers {
 		if prefix == "" {
-			quoted[i] = identifier.(string)
+			quoted[i] = identifier
 		} else {
-			quoted[i] = fmt.Sprintf("%s.%s", prefix, identifier.(string))
+			quoted[i] = fmt.Sprintf("%s.%s", prefix, identifier)
 		}
 	}
 
 	return strings.Join(quoted, ",")
 }
 
-func stripArgumentsFromCallablesDefinitions(defs *schema.Set) []string {
-	parser := func(name string) string {
-		return strings.Split(name, "(")[0]
-	}
-
-	names := make([]string, defs.Len())
-	for _, def := range defs.List() {
-		names = append(names, parser(def.(string)))
+func stripArgumentsFromCallablesDefinitions(defs []string) []string {
+	names := make([]string, len(defs))
+	for i, def := range defs {
+		names[i] = strings.Split(def, "(")[0]
 	}
 	return names
 }

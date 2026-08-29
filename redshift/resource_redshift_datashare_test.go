@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftDatashare_Basic(t *testing.T) {
@@ -55,9 +55,9 @@ resource "redshift_datashare" "basic" {
 }
 `, schemaNameAttr, shareName, schemaCascadeOnDeleteAttr, userNameAttr, dataShareNameAttr, dataShareOwnerAttr, dataSharePublicAccessibleAttr, dataShareSchemasAttr)
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatashareDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatashareDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -110,7 +110,7 @@ resource "redshift_datashare" "basic" {
 
 func testAccCheckRedshiftDatashareExists(shareName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkDatashareExists(client, shareName)
 		if err != nil {
@@ -145,7 +145,7 @@ func checkDatashareExists(client *Client, shareName string) (bool, error) {
 }
 
 func testAccCheckRedshiftDatashareDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_datashare" {

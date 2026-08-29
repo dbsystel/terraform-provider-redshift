@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftDatasharePrivilege_Namespace(t *testing.T) {
@@ -28,9 +28,9 @@ resource "redshift_datashare_privilege" "consumer_namespace" {
 `, dataShareNameAttr, shareName, datasharePrivilegeShareNameAttr, datasharePrivilegeNamespaceAttr, consumerNamespace)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatasharePrivilegeDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatasharePrivilegeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -59,9 +59,9 @@ resource "redshift_datashare_privilege" "consumer_account" {
 `, dataShareNameAttr, shareName, datasharePrivilegeShareNameAttr, datasharePrivilegeAccountAttr, consumerAccount)
 
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftDatasharePrivilegeDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftDatasharePrivilegeDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -75,7 +75,7 @@ resource "redshift_datashare_privilege" "consumer_account" {
 }
 
 func testAccCheckRedshiftDatasharePrivilegeDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_datashare_privilege" {
@@ -146,7 +146,7 @@ func checkDatasharePrivilegeNamespaceExists(client *Client, shareName string, na
 
 func testAccCheckRedshiftDatashareAccountPrivilegeExists(shareName string, account string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkDatasharePrivilegeAccountExists(client, shareName, account)
 		if err != nil {
@@ -163,7 +163,7 @@ func testAccCheckRedshiftDatashareAccountPrivilegeExists(shareName string, accou
 
 func testAccCheckRedshiftDatashareNamespacePrivilegeExists(shareName string, namespace string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkDatasharePrivilegeNamespaceExists(client, shareName, namespace)
 		if err != nil {

@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftGroupMembership_Basic(t *testing.T) {
@@ -51,9 +51,9 @@ resource "redshift_user" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -128,9 +128,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config1,
@@ -230,9 +230,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, newGroupName, userName1, userName2, userName3)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config1,
@@ -292,9 +292,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config1,
@@ -328,9 +328,9 @@ resource "redshift_group_membership" "simple" {
 }
 `, groupName, userName)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftGroupMembershipDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config1,
@@ -342,7 +342,7 @@ resource "redshift_group_membership" "simple" {
 
 func testAccCheckRedshiftGroupMembershipPresence(groupName, userName string, shouldBePresent bool) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkGroupMembershipExists(client, groupName, userName)
 		if err != nil {
@@ -383,7 +383,7 @@ func checkGroupMembershipExists(client *Client, groupName string, userNames ...s
 }
 
 func testAccCheckRedshiftGroupMembershipDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_group_membership" {
@@ -404,7 +404,7 @@ func testAccCheckRedshiftGroupMembershipDestroy(s *terraform.State) error {
 	return nil
 }
 
-func Test_calculateUserNamesDiff(t *testing.T) {
+func Test_diffStrings(t *testing.T) {
 	type args struct {
 		oldUserNames []string
 		newUserNames []string
@@ -480,12 +480,12 @@ func Test_calculateUserNamesDiff(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotDeletedUserNames, gotAddedUserNames := calculateUserNamesDiff(tt.args.oldUserNames, tt.args.newUserNames)
+			gotDeletedUserNames, gotAddedUserNames := diffStrings(tt.args.oldUserNames, tt.args.newUserNames)
 			if !reflect.DeepEqual(gotDeletedUserNames, tt.wantDeletedUserNames) {
-				t.Errorf("calculateUserNamesDiff() gotDeletedUserNames = %v, want %v", gotDeletedUserNames, tt.wantDeletedUserNames)
+				t.Errorf("diffStrings() gotDeletedUserNames = %v, want %v", gotDeletedUserNames, tt.wantDeletedUserNames)
 			}
 			if !reflect.DeepEqual(gotAddedUserNames, tt.wantAddedUserNames) {
-				t.Errorf("calculateUserNamesDiff() gotAddedUserNames = %v, want %v", gotAddedUserNames, tt.wantAddedUserNames)
+				t.Errorf("diffStrings() gotAddedUserNames = %v, want %v", gotAddedUserNames, tt.wantAddedUserNames)
 			}
 		})
 	}

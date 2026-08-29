@@ -1,15 +1,26 @@
 package redshift
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
@@ -24,99 +35,148 @@ const databaseDatashareSourceWithPermissions = "with_permissions"
 const databaseZeroETLIntegrationAttr = "zeroetl_integration"
 const databaseZeroETLIntegrationIdAttr = "integration_id"
 
-func redshiftDatabase() *schema.Resource {
-	return &schema.Resource{
-		Description:   `Defines a local database.`,
-		CreateContext: ResourceFunc(resourceRedshiftDatabaseCreate),
-		ReadContext:   ResourceFunc(resourceRedshiftDatabaseRead),
-		UpdateContext: ResourceFunc(resourceRedshiftDatabaseUpdate),
-		DeleteContext: ResourceFunc(resourceRedshiftDatabaseDelete),
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
-		CustomizeDiff: customdiff.All(
-			forceNewIfListSizeChanged(databaseDatashareSourceAttr),
-			forceNewIfListSizeChanged(databaseZeroETLIntegrationAttr),
-		),
-		Schema: map[string]*schema.Schema{
-			databaseNameAttr: {
-				Type:        schema.TypeString,
-				Required:    true,
-				Description: "Name of the database",
-				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
+var (
+	_ resource.Resource                = &databaseResource{}
+	_ resource.ResourceWithConfigure   = &databaseResource{}
+	_ resource.ResourceWithImportState = &databaseResource{}
+)
+
+func newDatabaseResource() resource.Resource {
+	return &databaseResource{}
+}
+
+type databaseResource struct {
+	frameworkClient
+}
+
+type databaseResourceModel struct {
+	ID                 types.String                      `tfsdk:"id"`
+	Name               types.String                      `tfsdk:"name"`
+	Owner              types.String                      `tfsdk:"owner"`
+	ConnectionLimit    types.Int64                       `tfsdk:"connection_limit"`
+	DatashareSource    []databaseDatashareSourceModel    `tfsdk:"datashare_source"`
+	ZeroETLIntegration []databaseZeroETLIntegrationModel `tfsdk:"zeroetl_integration"`
+}
+
+type databaseDatashareSourceModel struct {
+	ShareName       types.String `tfsdk:"share_name"`
+	Namespace       types.String `tfsdk:"namespace"`
+	AccountID       types.String `tfsdk:"account_id"`
+	WithPermissions types.Bool   `tfsdk:"with_permissions"`
+}
+
+type databaseZeroETLIntegrationModel struct {
+	IntegrationID types.String `tfsdk:"integration_id"`
+}
+
+func (r *databaseResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_database"
+}
+
+func (r *databaseResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		Description: `Defines a local database.`,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The database ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			databaseOwnerAttr: {
-				Type:        schema.TypeString,
+			databaseNameAttr: schema.StringAttribute{
+				Required:    true,
+				Description: "Name of the database",
+				PlanModifiers: []planmodifier.String{
+					normalizeString(strings.ToLower),
+				},
+			},
+			databaseOwnerAttr: schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Owner of the database, usually the user who created it",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
-			databaseConnLimitAttr: {
-				Type:         schema.TypeInt,
-				Optional:     true,
-				Description:  "The maximum number of concurrent connections that can be made to this database. A value of -1 means no limit.",
-				Default:      -1,
-				ValidateFunc: validation.IntAtLeast(-1),
+			databaseConnLimitAttr: schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(-1),
+				Description: "The maximum number of concurrent connections that can be made to this database. A value of -1 means no limit.",
+				Validators: []validator.Int64{
+					int64validator.AtLeast(-1),
+				},
 			},
-			databaseDatashareSourceAttr: {
-				Type:          schema.TypeList,
-				Optional:      true,
-				MaxItems:      1,
-				Description:   "Configuration for creating a database from a redshift datashare.",
-				ConflictsWith: []string{databaseZeroETLIntegrationAttr},
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						databaseDatashareSourceShareNameAttr: {
-							Type:        schema.TypeString,
+		},
+		Blocks: map[string]schema.Block{
+			databaseDatashareSourceAttr: schema.ListNestedBlock{
+				Description: "Configuration for creating a database from a redshift datashare.",
+				Validators: []validator.List{
+					listvalidator.SizeAtMost(1),
+					listvalidator.ConflictsWith(path.MatchRoot(databaseZeroETLIntegrationAttr)),
+				},
+				PlanModifiers: []planmodifier.List{
+					requiresReplaceIfListSizeChanged(),
+				},
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						databaseDatashareSourceShareNameAttr: schema.StringAttribute{
 							Required:    true,
-							ForceNew:    true,
 							Description: "The name of the datashare on the producer cluster",
-							StateFunc: func(val interface{}) string {
-								return strings.ToLower(val.(string))
+							PlanModifiers: []planmodifier.String{
+								normalizeString(strings.ToLower),
+								stringplanmodifier.RequiresReplace(),
 							},
 						},
-						databaseDatashareSourceNamespaceAttr: {
-							Type:        schema.TypeString,
+						databaseDatashareSourceNamespaceAttr: schema.StringAttribute{
 							Required:    true,
-							ForceNew:    true,
 							Description: "The namespace (guid) of the producer cluster",
-							StateFunc: func(val interface{}) string {
-								return strings.ToLower(val.(string))
+							PlanModifiers: []planmodifier.String{
+								normalizeString(strings.ToLower),
+								stringplanmodifier.RequiresReplace(),
 							},
 						},
-						databaseDatashareSourceAccountAttr: {
-							Type:         schema.TypeString,
-							Optional:     true,
-							ForceNew:     true,
-							Computed:     true,
-							Description:  "The AWS account ID of the producer cluster.",
-							ValidateFunc: validation.StringMatch(awsAccountIdRegexp, "AWS account id must be a 12-digit number"),
-						},
-						databaseDatashareSourceWithPermissions: {
-							Type:        schema.TypeBool,
+						databaseDatashareSourceAccountAttr: schema.StringAttribute{
 							Optional:    true,
-							ForceNew:    true,
+							Computed:    true,
+							Description: "The AWS account ID of the producer cluster.",
+							Validators: []validator.String{
+								stringvalidator.RegexMatches(awsAccountIdRegexp, "AWS account id must be a 12-digit number"),
+							},
+							PlanModifiers: []planmodifier.String{
+								stringplanmodifier.UseStateForUnknown(),
+								stringplanmodifier.RequiresReplace(),
+							},
+						},
+						databaseDatashareSourceWithPermissions: schema.BoolAttribute{
+							Optional:    true,
+							Computed:    true,
+							Default:     booldefault.StaticBool(false),
 							Description: "Whether the database requires object-level permissions to access individual database objects",
-							Default:     false,
+							PlanModifiers: []planmodifier.Bool{
+								boolplanmodifier.RequiresReplace(),
+							},
 						},
 					},
 				},
 			},
-			databaseZeroETLIntegrationAttr: {
-				Type:          schema.TypeList,
-				Optional:      true,
-				MaxItems:      1,
-				Description:   "Configuration for creating a database from a zero ETL integration.",
-				ConflictsWith: []string{databaseDatashareSourceAttr},
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						databaseZeroETLIntegrationIdAttr: {
-							Type:        schema.TypeString,
+			databaseZeroETLIntegrationAttr: schema.ListNestedBlock{
+				Description: "Configuration for creating a database from a zero ETL integration.",
+				Validators: []validator.List{
+					listvalidator.SizeAtMost(1),
+				},
+				PlanModifiers: []planmodifier.List{
+					requiresReplaceIfListSizeChanged(),
+				},
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						databaseZeroETLIntegrationIdAttr: schema.StringAttribute{
 							Required:    true,
-							ForceNew:    true,
 							Description: "The unique identifier of the zero ETL integration",
+							PlanModifiers: []planmodifier.String{
+								stringplanmodifier.RequiresReplace(),
+							},
 						},
 					},
 				},
@@ -125,109 +185,147 @@ func redshiftDatabase() *schema.Resource {
 	}
 }
 
-func resourceRedshiftDatabaseCreate(db *DBConnection, d *schema.ResourceData) error {
-	if _, isDataShare := d.GetOk(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceShareNameAttr)); isDataShare {
-		return resourceRedshiftDatabaseCreateFromDatashare(db, d)
-	}
-	return resourceRedshiftDatabaseCreateInternal(db, d)
+func (r *databaseResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
 }
 
-func resourceRedshiftDatabaseCreateFromDatashare(db *DBConnection, d *schema.ResourceData) error {
-	dbName := d.Get(databaseNameAttr).(string)
-	query := fmt.Sprintf("CREATE DATABASE %s", pq.QuoteIdentifier(dbName))
+func (r *databaseResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
 
-	if d.Get(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceWithPermissions)).(bool) {
+func (r *databaseResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model databaseResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	var (
+		oid string
+		err error
+	)
+	if len(model.DatashareSource) > 0 {
+		oid, err = createDatabaseFromDatashare(db, model)
+	} else {
+		oid, err = createDatabase(db, model)
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create the database", err.Error())
+		return
+	}
+
+	model.ID = types.StringValue(oid)
+	if !r.refresh(db, &model, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func createDatabaseFromDatashare(db *DBConnection, model databaseResourceModel) (string, error) {
+	dbName := model.Name.ValueString()
+	source := model.DatashareSource[0]
+
+	query := fmt.Sprintf("CREATE DATABASE %s", pq.QuoteIdentifier(dbName))
+	if source.WithPermissions.ValueBool() {
 		query = fmt.Sprintf("%s WITH PERMISSIONS", query)
 	}
-
-	shareName := d.Get(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceShareNameAttr)).(string)
-	query = fmt.Sprintf("%s FROM DATASHARE %s OF", query, pq.QuoteIdentifier(shareName))
-
-	if sourceAccount, ok := d.GetOk(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceAccountAttr)); ok {
-		query = fmt.Sprintf("%s ACCOUNT '%s'", query, pqQuoteLiteral(sourceAccount.(string)))
+	query = fmt.Sprintf("%s FROM DATASHARE %s OF", query, pq.QuoteIdentifier(source.ShareName.ValueString()))
+	if !source.AccountID.IsNull() && !source.AccountID.IsUnknown() {
+		query = fmt.Sprintf("%s ACCOUNT '%s'", query, pqQuoteLiteral(source.AccountID.ValueString()))
 	}
-	namespace := d.Get(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceNamespaceAttr))
-	query = fmt.Sprintf("%s NAMESPACE '%s'", query, pqQuoteLiteral(namespace.(string)))
+	query = fmt.Sprintf("%s NAMESPACE '%s'", query, pqQuoteLiteral(source.Namespace.ValueString()))
 
 	if _, err := db.Exec(query); err != nil {
-		return err
+		return "", err
 	}
 
 	// eagerly get the resource ID in case the below statements fail for some reason
-	var oid string
-	query = "SELECT oid FROM pg_database WHERE datname = $1"
-	log.Printf("[DEBUG] get oid from database: %s\n", query)
-	if err := db.QueryRow(query, strings.ToLower(dbName)).Scan(&oid); err != nil {
-		return err
+	oid, err := databaseOID(db, dbName)
+	if err != nil {
+		return "", err
 	}
-	d.SetId(oid)
 
 	// CREATE DATABASE isn't allowed to run inside a transaction, however ALTER DATABASE
 	// can be
 	tx, err := startTransaction(db.client)
 	if err != nil {
-		return err
+		return oid, err
 	}
 	defer deferredRollback(tx)
 
-	// CREATE DATABASE FROM DATASHARE... doesn't allow you to specify an owner in the create statement,
-	// so we need to set the owner after creation using ALTER DATABASE...
-	owner, ownerIsSet := d.GetOk(databaseOwnerAttr)
-	if ownerIsSet {
-		if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(owner.(string)))); err != nil {
-			return err
+	// CREATE DATABASE FROM DATASHARE... doesn't allow you to specify an owner or the
+	// connection limit in the create statement, so both are set afterwards.
+	if !model.Owner.IsNull() && !model.Owner.IsUnknown() {
+		if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(model.Owner.ValueString()))); err != nil {
+			return oid, err
 		}
 	}
-
-	// CREATE DATABASE FROM DATASHARE... doesn't allow you to specify the connection limit in the create statement,
-	// so we need to set the owner after creation using ALTER DATABASE...
-	connLimit, connLimitIsSet := d.GetOk(databaseConnLimitAttr)
-	if connLimitIsSet {
-		if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(dbName), connLimit.(int))); err != nil {
-			return err
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
+	if _, err = tx.Exec(fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(dbName), model.ConnectionLimit.ValueInt64())); err != nil {
+		return oid, err
 	}
 
-	return resourceRedshiftDatabaseRead(db, d)
+	return oid, tx.Commit()
 }
 
-func resourceRedshiftDatabaseCreateInternal(db *DBConnection, d *schema.ResourceData) error {
-	dbName := d.Get(databaseNameAttr).(string)
+func createDatabase(db *DBConnection, model databaseResourceModel) (string, error) {
+	dbName := model.Name.ValueString()
 	query := fmt.Sprintf("CREATE DATABASE %s", pq.QuoteIdentifier(dbName))
 
-	// Handle Zero ETL integration source if specified
-	if _, isZeroETLIntegration := d.GetOk(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)); isZeroETLIntegration {
-		integrationId := d.Get(fmt.Sprintf("%s.0.%s", databaseZeroETLIntegrationAttr, databaseZeroETLIntegrationIdAttr)).(string)
-		query = fmt.Sprintf("%s FROM INTEGRATION '%s'", query, pqQuoteLiteral(integrationId))
+	if len(model.ZeroETLIntegration) > 0 {
+		query = fmt.Sprintf("%s FROM INTEGRATION '%s'", query, pqQuoteLiteral(model.ZeroETLIntegration[0].IntegrationID.ValueString()))
 	}
+	if !model.Owner.IsNull() && !model.Owner.IsUnknown() {
+		query = fmt.Sprintf("%s OWNER %s", query, pq.QuoteIdentifier(model.Owner.ValueString()))
+	}
+	query = fmt.Sprintf("%s CONNECTION LIMIT %d", query, model.ConnectionLimit.ValueInt64())
 
-	if v, ok := d.GetOk(databaseOwnerAttr); ok {
-		query = fmt.Sprintf("%s OWNER %s", query, pq.QuoteIdentifier(v.(string)))
-	}
-	if v, ok := d.GetOk(databaseConnLimitAttr); ok {
-		query = fmt.Sprintf("%s CONNECTION LIMIT %d", query, v.(int))
-	}
 	log.Printf("[DEBUG] create database %s: %s\n", dbName, query)
 	if _, err := db.Exec(query); err != nil {
-		return err
+		return "", err
 	}
 
-	var oid string
-	query = "SELECT oid FROM pg_database WHERE datname = $1"
-	log.Printf("[DEBUG] get oid from database: %s\n", query)
-	if err := db.QueryRow(query, strings.ToLower(dbName)).Scan(&oid); err != nil {
-		return err
-	}
-
-	d.SetId(oid)
-
-	return resourceRedshiftDatabaseRead(db, d)
+	return databaseOID(db, dbName)
 }
 
-func resourceRedshiftDatabaseRead(db *DBConnection, d *schema.ResourceData) error {
+func databaseOID(db *DBConnection, dbName string) (string, error) {
+	var oid string
+	query := "SELECT oid FROM pg_database WHERE datname = $1"
+	log.Printf("[DEBUG] get oid from database: %s\n", query)
+	if err := db.QueryRow(query, strings.ToLower(dbName)).Scan(&oid); err != nil {
+		return "", err
+	}
+	return oid, nil
+}
+
+func (r *databaseResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model databaseResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	if !r.refresh(db, &model, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+// refresh fills the model from the cluster. It reports whether the caller may go on.
+//
+// zeroetl_integration is left as it is: the cluster does not report whether a database
+// came from an integration, so the configured value is all there is. That does not
+// survive an import, but it does keep the plan empty during the normal lifecycle.
+func (r *databaseResource) refresh(db *DBConnection, model *databaseResourceModel, diagnostics *diag.Diagnostics) bool {
 	var name, owner, connLimit, databaseType, shareName, producerAccount, producerNamespace string
 
 	query := `SELECT
@@ -249,124 +347,129 @@ LEFT JOIN svv_datashares
 WHERE pg_database_info.datid = $1
 `
 	log.Printf("[DEBUG] read database: %s\n", query)
-	err := db.QueryRow(query, d.Id()).Scan(&name, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
-
+	err := db.QueryRow(query, model.ID.ValueString()).Scan(&name, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
 	if err != nil {
-		return err
+		diagnostics.AddError("Unable to read the database", err.Error())
+		return false
 	}
 
 	connLimitNumber := -1
 	if connLimit != "UNLIMITED" {
 		if connLimitNumber, err = strconv.Atoi(connLimit); err != nil {
-			return err
+			diagnostics.AddError("Unable to read the database connection limit", err.Error())
+			return false
 		}
 	}
 
-	d.Set(databaseNameAttr, name)
-	d.Set(databaseOwnerAttr, owner)
-	d.Set(databaseConnLimitAttr, connLimitNumber)
+	model.Name = types.StringValue(name)
+	model.Owner = types.StringValue(owner)
+	model.ConnectionLimit = types.Int64Value(int64(connLimitNumber))
 
-	dataShareConfiguration := make([]map[string]interface{}, 0, 1)
 	if databaseType == "shared" {
-		config := make(map[string]interface{})
-		config[databaseDatashareSourceShareNameAttr] = &shareName
-		config[databaseDatashareSourceAccountAttr] = &producerAccount
-		config[databaseDatashareSourceNamespaceAttr] = &producerNamespace
-		config[databaseDatashareSourceWithPermissions] = d.Get(fmt.Sprintf("%s.0.%s", databaseDatashareSourceAttr, databaseDatashareSourceWithPermissions)).(bool)
-		dataShareConfiguration = append(dataShareConfiguration, config)
+		// The cluster does not report whether the database was created with permissions,
+		// so that part of the block stays as configured.
+		withPermissions := types.BoolValue(false)
+		if len(model.DatashareSource) > 0 {
+			withPermissions = model.DatashareSource[0].WithPermissions
+		}
+		model.DatashareSource = []databaseDatashareSourceModel{{
+			ShareName:       types.StringValue(shareName),
+			Namespace:       types.StringValue(producerNamespace),
+			AccountID:       types.StringValue(producerAccount),
+			WithPermissions: withPermissions,
+		}}
+	} else {
+		// An absent datashare_source block decodes as an empty list, so keep the
+		// refreshed value empty rather than null to avoid a perpetual diff.
+		model.DatashareSource = []databaseDatashareSourceModel{}
 	}
-	d.Set(databaseDatashareSourceAttr, dataShareConfiguration)
 
-	// We have no logic to query the cluster to determine if a database is associated
-	// with a zero ETL integration, so we preserve the config value in state.
-	// This won't survive an import, but prevents perpetual diffs during normal lifecycle.
-	if v, ok := d.GetOk(databaseZeroETLIntegrationAttr); ok {
-		d.Set(databaseZeroETLIntegrationAttr, v)
-	}
-
-	return nil
+	return true
 }
 
-func resourceRedshiftDatabaseUpdate(db *DBConnection, d *schema.ResourceData) error {
+func (r *databaseResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state databaseResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	if err := updateDatabase(db, plan, state); err != nil {
+		resp.Diagnostics.AddError("Unable to update the database", err.Error())
+		return
+	}
+
+	plan.ID = state.ID
+	if !r.refresh(db, &plan, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func updateDatabase(db *DBConnection, plan, state databaseResourceModel) error {
 	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
 	defer deferredRollback(tx)
 
-	if err := setDatabaseName(tx, d); err != nil {
-		return err
+	databaseName := plan.Name.ValueString()
+
+	if databaseName != state.Name.ValueString() {
+		if databaseName == "" {
+			return fmt.Errorf("error setting database name to an empty string")
+		}
+		query := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", pq.QuoteIdentifier(state.Name.ValueString()), pq.QuoteIdentifier(databaseName))
+		log.Printf("[DEBUG] renaming database %s to %s: %s\n", state.Name.ValueString(), databaseName, query)
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating database NAME: %w", err)
+		}
 	}
 
-	if err := setDatabaseOwner(tx, d); err != nil {
-		return err
+	if !plan.Owner.IsUnknown() && plan.Owner.ValueString() != state.Owner.ValueString() {
+		query := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(plan.Owner.ValueString()))
+		log.Printf("[DEBUG] changing database owner: %s\n", query)
+		if _, err := tx.Exec(query); err != nil {
+			return err
+		}
 	}
 
-	if err := setDatabaseConnLimit(tx, d); err != nil {
-		return err
+	if plan.ConnectionLimit.ValueInt64() != state.ConnectionLimit.ValueInt64() {
+		query := fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(databaseName), plan.ConnectionLimit.ValueInt64())
+		log.Printf("[DEBUG] changing database connection limit: %s\n", query)
+		if _, err := tx.Exec(query); err != nil {
+			return err
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
-
-	return resourceRedshiftDatabaseRead(db, d)
-}
-
-func setDatabaseName(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(databaseNameAttr) {
-		return nil
-	}
-
-	oldRaw, newRaw := d.GetChange(databaseNameAttr)
-	oldValue := oldRaw.(string)
-	newValue := newRaw.(string)
-
-	if newValue == "" {
-		return fmt.Errorf("error setting database name to an empty string")
-	}
-
-	query := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", pq.QuoteIdentifier(oldValue), pq.QuoteIdentifier(newValue))
-	log.Printf("[DEBUG] renaming database %s to %s: %s\n", oldValue, newValue, query)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating database NAME: %w", err)
-	}
-
 	return nil
 }
 
-func setDatabaseOwner(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(databaseOwnerAttr) {
-		return nil
+func (r *databaseResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model databaseResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	databaseName := d.Get(databaseNameAttr).(string)
-	databaseOwner := d.Get(databaseOwnerAttr).(string)
-
-	query := fmt.Sprintf("ALTER DATABASE %s OWNER TO %s", pq.QuoteIdentifier(databaseName), pq.QuoteIdentifier(databaseOwner))
-	log.Printf("[DEBUG] changing database owner: %s\n", query)
-	_, err := tx.Exec(query)
-	return err
-}
-
-func setDatabaseConnLimit(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(databaseConnLimitAttr) {
-		return nil
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
 	}
 
-	databaseName := d.Get(databaseNameAttr).(string)
-	connLimit := d.Get(databaseConnLimitAttr).(int)
-	query := fmt.Sprintf("ALTER DATABASE %s CONNECTION LIMIT %d", pq.QuoteIdentifier(databaseName), connLimit)
-	log.Printf("[DEBUG] changing database connection limit: %s\n", query)
-	_, err := tx.Exec(query)
-	return err
-}
-
-func resourceRedshiftDatabaseDelete(db *DBConnection, d *schema.ResourceData) error {
-	databaseName := d.Get(databaseNameAttr).(string)
-
+	databaseName := model.Name.ValueString()
 	query := fmt.Sprintf("DROP DATABASE %s", pqQuoteLiteral(databaseName))
 	log.Printf("[DEBUG] dropping database %s: %s\n", databaseName, query)
-	_, err := db.Exec(query)
-	return err
+	if _, err := db.Exec(query); err != nil {
+		resp.Diagnostics.AddError("Unable to delete the database", err.Error())
+	}
 }

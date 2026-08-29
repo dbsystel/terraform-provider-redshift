@@ -13,10 +13,12 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestUnquoteUseConfigValue(t *testing.T) {
@@ -114,9 +116,9 @@ func TestAccRedshiftUser_Login(t *testing.T) {
 		t.Skipf("Skipping user login test as REDSHIFT_TEST_ACC_SKIP_USER_LOGIN is set")
 	}
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftUserLoginConfig,
@@ -183,9 +185,9 @@ resource "redshift_user" "user_timeout" {
 func TestAccRedshiftUser_Basic(t *testing.T) {
 	// todo: use dynamic names for users
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftUserConfig,
@@ -243,9 +245,9 @@ resource "redshift_user" "update_user" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -319,9 +321,9 @@ resource "redshift_user" "session_parameters" {
 `
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -371,9 +373,9 @@ resource "redshift_user" "update_superuser" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -426,9 +428,9 @@ resource "redshift_user" "superuser" {
 `, userName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
@@ -448,9 +450,9 @@ resource "redshift_user" "superuser" {
 `, userName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -501,9 +503,9 @@ func TestAccRedshiftUser_SuperuserSyslogAccess(t *testing.T) {
 			`, userName, test.isSuperuser, test.syslogAccess)
 
 			resource.Test(t, resource.TestCase{
-				PreCheck:          func() { testAccPreCheck(t) },
-				ProviderFactories: testAccProviders,
-				CheckDestroy:      testAccCheckRedshiftUserDestroy,
+				PreCheck:                 func() { testAccPreCheck(t) },
+				ProtoV6ProviderFactories: testAccProtoV6Providers,
+				CheckDestroy:             testAccCheckRedshiftUserDestroy,
 				Steps: []resource.TestStep{
 					{
 						Config:      config,
@@ -555,15 +557,17 @@ resource "unknown_string" "password" {}
 		},
 	}
 
-	providers := map[string]func() (*schema.Provider, error){
-		"unknown":  func() (*schema.Provider, error) { return unknownProvider, nil },
-		"redshift": func() (*schema.Provider, error) { return testAccProvider, nil },
+	providers := map[string]func() (tfprotov6.ProviderServer, error){
+		"unknown": func() (tfprotov6.ProviderServer, error) {
+			return tf5to6server.UpgradeServer(context.Background(), unknownProvider.GRPCProvider)
+		},
+		"redshift": testAccProtoV6Providers["redshift"],
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: providers,
-		CheckDestroy:      testAccCheckRedshiftUserDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: providers,
+		CheckDestroy:             testAccCheckRedshiftUserDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -573,7 +577,7 @@ resource "unknown_string" "password" {}
 }
 
 func testAccCheckRedshiftUserDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_user" {
@@ -596,7 +600,7 @@ func testAccCheckRedshiftUserDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftUserExists(user string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkUserExists(client, user)
 		if err != nil {

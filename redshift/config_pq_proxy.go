@@ -15,13 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/redshift"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/hashicorp/go-cty/cty"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	_ "github.com/lib/pq"
 )
 
-type temporaryCredentialsResolverFunc func(username string, d *schema.ResourceData) (string, string, error)
+type temporaryCredentialsResolverFunc func(username string, s *providerSettings) (string, string, error)
 
 func NewPqConfig(host, database, username, password string, port int, sslMode string, maxConns, connectTimeout int, sessionParameters map[string]string) *Config {
 	connStr := buildConnStrFromPqConfig(host, database, username, password, port, sslMode, connectTimeout, sessionParameters)
@@ -77,50 +74,21 @@ func buildConnStrFromPqConfig(host, database, username, password string, port in
 	)
 }
 
-func getConfigFromPqResourceData(d *schema.ResourceData, database string, maxConnections int, temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
-	var password string
-	host := d.Get("host").(string)
-	username := d.Get("username").(string)
-	port := d.Get("port").(int)
-	sslMode := d.Get("sslmode").(string)
-	connectTimeout := d.Get("connect_timeout").(int)
-	sessionParameters, err := sessionParametersFromResourceData(d)
-	if err != nil {
-		return nil, err
-	}
+func (s *providerSettings) pqConfig(temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
+	var err error
+	username, password := s.Username, s.Password
 	log.Printf("[DEBUG] using username %q for authentication\n", username)
-	_, useTemporaryCredentials := d.GetOk("temporary_credentials")
-	if useTemporaryCredentials {
+	if s.TemporaryCredentials != nil {
 		log.Println("[DEBUG] using temporary credentials authentication")
-		username, password, err = temporaryCredentialsResolver(username, d)
+		username, password, err = temporaryCredentialsResolver(username, s)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve temporary credentials: %w", err)
 		}
 		log.Printf("[DEBUG] got temporary credentials with username %s\n", username)
 	} else {
 		log.Println("[DEBUG] using password authentication")
-		password = d.Get("password").(string)
 	}
-	return NewPqConfig(host, database, username, password, port, sslMode, maxConnections, connectTimeout, sessionParameters), nil
-}
-
-// sessionParametersFromResourceData reads and validates the `session_parameters` provider
-// argument.
-func sessionParametersFromResourceData(d *schema.ResourceData) (map[string]string, error) {
-	raw, ok := d.GetOk("session_parameters")
-	if !ok {
-		return nil, nil
-	}
-
-	sessionParameters := map[string]string{}
-	for name, value := range raw.(map[string]interface{}) {
-		stringValue := value.(string)
-		if err := validateSessionParameter(name, stringValue); err != nil {
-			return nil, err
-		}
-		sessionParameters[name] = stringValue
-	}
-	return sessionParameters, nil
+	return NewPqConfig(s.Host, s.Database, username, password, s.Port, s.SSLMode, s.MaxConnections, s.ConnectTimeout, s.SessionParameters), nil
 }
 
 func validateSessionParameter(name, value string) error {
@@ -133,70 +101,30 @@ func validateSessionParameter(name, value string) error {
 	return nil
 }
 
-// validateSessionParameters reports invalid parameters during validation rather than
-// waiting until the provider is configured, so that the diagnostic carries the attribute
-// path and `terraform validate` rejects the configuration.
-func validateSessionParameters(value interface{}, path cty.Path) diag.Diagnostics {
-	sessionParameters, ok := value.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	var diags diag.Diagnostics
-	for name, raw := range sessionParameters {
-		stringValue, isString := raw.(string)
-		if !isString {
-			continue
-		}
-		if err := validateSessionParameter(name, stringValue); err != nil {
-			diags = append(diags, diag.Diagnostic{
-				Severity:      diag.Error,
-				Summary:       "Invalid session parameter",
-				Detail:        err.Error(),
-				AttributePath: append(path, cty.IndexStep{Key: cty.StringVal(name)}),
-			})
-		}
-	}
-	return diags
-}
-
 // temporaryCredentials gets temporary credentials using GetClusterCredentials
-func temporaryCredentials(username string, d *schema.ResourceData) (string, string, error) {
-	sdkClient, err := redshiftSdkClient(d)
+func temporaryCredentials(username string, s *providerSettings) (string, string, error) {
+	if s.TemporaryCredentials == nil || s.TemporaryCredentials.ClusterIdentifier == "" {
+		return "", "", fmt.Errorf("temporary_credentials not configured")
+	}
+	sdkClient, err := redshiftSdkClient(s.TemporaryCredentials)
 	if err != nil {
 		return "", "", err
 	}
-	clusterIdentifier, clusterIdentifierIsSet := d.GetOk("temporary_credentials.0.cluster_identifier")
-	if !clusterIdentifierIsSet {
-		return "", "", fmt.Errorf("temporary_credentials not configured")
-	}
 	input := &redshift.GetClusterCredentialsInput{
-		ClusterIdentifier: aws.String(clusterIdentifier.(string)),
-		DbName:            aws.String(d.Get("database").(string)),
+		ClusterIdentifier: aws.String(s.TemporaryCredentials.ClusterIdentifier),
+		DbName:            aws.String(s.Database),
 		DbUser:            aws.String(username),
 	}
-	if autoCreateUser, ok := d.GetOk("temporary_credentials.0.auto_create_user"); ok {
-		input.AutoCreate = aws.Bool(autoCreateUser.(bool))
+	if s.TemporaryCredentials.AutoCreateUser {
+		input.AutoCreate = aws.Bool(true)
 	}
-	if dbGroups, ok := d.GetOk("temporary_credentials.0.db_groups"); ok {
-		if dbGroups != nil {
-			dbGroupsList := dbGroups.(*schema.Set).List()
-			if len(dbGroupsList) > 0 {
-				var groups []string
-				for _, group := range dbGroupsList {
-					if group.(string) != "" {
-						groups = append(groups, group.(string))
-					}
-				}
-				input.DbGroups = groups
-			}
+	for _, group := range s.TemporaryCredentials.DbGroups {
+		if group != "" {
+			input.DbGroups = append(input.DbGroups, group)
 		}
 	}
-	if durationSeconds, ok := d.GetOk("temporary_credentials.0.duration_seconds"); ok {
-		duration := durationSeconds.(int)
-		if duration > 0 {
-			input.DurationSeconds = aws.Int32(int32(duration))
-		}
+	if s.TemporaryCredentials.DurationSeconds > 0 {
+		input.DurationSeconds = aws.Int32(int32(s.TemporaryCredentials.DurationSeconds))
 	}
 	log.Println("[DEBUG] making GetClusterCredentials request")
 	response, err := sdkClient.GetClusterCredentials(context.TODO(), input)
@@ -206,33 +134,29 @@ func temporaryCredentials(username string, d *schema.ResourceData) (string, stri
 	return aws.ToString(response.DbUser), aws.ToString(response.DbPassword), nil
 }
 
-func redshiftSdkClient(d *schema.ResourceData) (*redshift.Client, error) {
+func redshiftSdkClient(s *temporaryCredentialsSettings) (*redshift.Client, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		return nil, err
 	}
 
-	if region := d.Get("temporary_credentials.0.region").(string); region != "" {
-		cfg.Region = region
+	if s.Region != "" {
+		cfg.Region = s.Region
 	}
 
-	if _, ok := d.GetOk("temporary_credentials.0.assume_role"); ok {
-		var parsedRoleArn string
-		if roleArn, ok := d.GetOk("temporary_credentials.0.assume_role.0.arn"); ok {
-			parsedRoleArn = roleArn.(string)
-		}
-		log.Printf("[DEBUG] Assuming role provided in configuration: [%s]", parsedRoleArn)
+	if s.AssumeRole != nil {
+		log.Printf("[DEBUG] Assuming role provided in configuration: [%s]", s.AssumeRole.Arn)
 		opts := func(options *stscreds.AssumeRoleOptions) {
 			options.Duration = time.Duration(defaultTemporaryCredentialsAssumeRoleDurationInSeconds) * time.Second
-			if externalID, ok := d.GetOk("temporary_credentials.0.assume_role.0.external_id"); ok {
-				options.ExternalID = aws.String(externalID.(string))
+			if s.AssumeRole.ExternalID != "" {
+				options.ExternalID = aws.String(s.AssumeRole.ExternalID)
 			}
-			if sessionName, ok := d.GetOk("temporary_credentials.0.assume_role.0.session_name"); ok {
-				options.RoleSessionName = sessionName.(string)
+			if s.AssumeRole.SessionName != "" {
+				options.RoleSessionName = s.AssumeRole.SessionName
 			}
 		}
 		stsClient := sts.NewFromConfig(cfg)
-		cfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, parsedRoleArn, opts)
+		cfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, s.AssumeRole.Arn, opts)
 	}
 	return redshift.NewFromConfig(cfg), nil
 }

@@ -127,13 +127,13 @@ resource "redshift_schema" "external_from_redshift" {
 ### Optional
 
 - `cascade_on_delete` (Boolean) Indicates to automatically drop all objects in the schema. The default action is TO NOT drop a schema if it contains any objects.
-- `external_schema` (Block List, Max: 1) Configures the schema as an external schema. See https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_EXTERNAL_SCHEMA.html (see [below for nested schema](#nestedblock--external_schema))
+- `external_schema` (Block List) Configures the schema as an external schema. See https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_EXTERNAL_SCHEMA.html (see [below for nested schema](#nestedblock--external_schema))
 - `owner` (String) Name of the schema owner.
 - `quota` (Number) The maximum amount of disk space that the specified schema can use. GB is the default unit of measurement.
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The schema ID.
 
 <a id="nestedblock--external_schema"></a>
 ### Nested Schema for `external_schema`
@@ -144,11 +144,11 @@ Required:
 
 Optional:
 
-- `data_catalog_source` (Block List, Max: 1) Configures the external schema from the AWS Glue Data Catalog (see [below for nested schema](#nestedblock--external_schema--data_catalog_source))
-- `hive_metastore_source` (Block List, Max: 1) Configures the external schema from a Hive Metastore. (see [below for nested schema](#nestedblock--external_schema--hive_metastore_source))
-- `rds_mysql_source` (Block List, Max: 1) Configures the external schema to reference data using a federated query to RDS MYSQL or Aurora MySQL. (see [below for nested schema](#nestedblock--external_schema--rds_mysql_source))
-- `rds_postgres_source` (Block List, Max: 1) Configures the external schema to reference data using a federated query to RDS POSTGRES or Aurora PostgreSQL. (see [below for nested schema](#nestedblock--external_schema--rds_postgres_source))
-- `redshift_source` (Block List, Max: 1) Configures the external schema to reference datashare database. (see [below for nested schema](#nestedblock--external_schema--redshift_source))
+- `data_catalog_source` (Block List) Configures the external schema from the AWS Glue Data Catalog (see [below for nested schema](#nestedblock--external_schema--data_catalog_source))
+- `hive_metastore_source` (Block List) Configures the external schema from a Hive Metastore. (see [below for nested schema](#nestedblock--external_schema--hive_metastore_source))
+- `rds_mysql_source` (Block List) Configures the external schema to reference data using a federated query to RDS MYSQL or Aurora MySQL. (see [below for nested schema](#nestedblock--external_schema--rds_mysql_source))
+- `rds_postgres_source` (Block List) Configures the external schema to reference data using a federated query to RDS POSTGRES or Aurora PostgreSQL. (see [below for nested schema](#nestedblock--external_schema--rds_postgres_source))
+- `redshift_source` (Block List) Configures the external schema to reference datashare database. (see [below for nested schema](#nestedblock--external_schema--redshift_source))
 
 <a id="nestedblock--external_schema--data_catalog_source"></a>
 ### Nested Schema for `external_schema.data_catalog_source`
