@@ -57,5 +57,5 @@ resource "redshift_datashare_privilege" "cross_account" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The datashare privilege ID.
 - `share_date` (String) When the datashare permission was granted

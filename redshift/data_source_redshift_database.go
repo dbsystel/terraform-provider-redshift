@@ -1,63 +1,82 @@
 package redshift
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func dataSourceRedshiftDatabase() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ datasource.DataSource              = &databaseDataSource{}
+	_ datasource.DataSourceWithConfigure = &databaseDataSource{}
+)
+
+func newDatabaseDataSource() datasource.DataSource {
+	return &databaseDataSource{}
+}
+
+type databaseDataSource struct {
+	frameworkClient
+}
+
+type databaseDataSourceModel struct {
+	ID              types.String `tfsdk:"id"`
+	Name            types.String `tfsdk:"name"`
+	Owner           types.String `tfsdk:"owner"`
+	ConnectionLimit types.Int64  `tfsdk:"connection_limit"`
+	DatashareSource types.List   `tfsdk:"datashare_source"`
+}
+
+// datashareSourceAttributeTypes describes one element of the datashare_source list.
+var datashareSourceAttributeTypes = map[string]attr.Type{
+	databaseDatashareSourceShareNameAttr: types.StringType,
+	databaseDatashareSourceNamespaceAttr: types.StringType,
+	databaseDatashareSourceAccountAttr:   types.StringType,
+}
+
+func (d *databaseDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_database"
+}
+
+func (d *databaseDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: `Fetches information about a Redshift database.`,
-		ReadContext: ResourceFunc(dataSourceRedshiftDatabaseRead),
-		Schema: map[string]*schema.Schema{
-			databaseNameAttr: {
-				Type:        schema.TypeString,
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The database ID.",
+			},
+			databaseNameAttr: schema.StringAttribute{
 				Required:    true,
 				Description: "Name of the database",
-				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
-				},
 			},
-			databaseOwnerAttr: {
-				Type:        schema.TypeString,
+			databaseOwnerAttr: schema.StringAttribute{
 				Computed:    true,
 				Description: "Owner of the database, usually the user who created it",
 			},
-			databaseConnLimitAttr: {
-				Type:        schema.TypeInt,
+			databaseConnLimitAttr: schema.Int64Attribute{
 				Computed:    true,
 				Description: "The maximum number of concurrent connections that can be made to this database. A value of -1 means no limit.",
 			},
-			databaseDatashareSourceAttr: {
-				Type:        schema.TypeList,
-				Optional:    true,
-				MaxItems:    1,
+			databaseDatashareSourceAttr: schema.ListNestedAttribute{
+				Computed:    true,
 				Description: "Configuration for a database created from a redshift datashare.",
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						databaseDatashareSourceShareNameAttr: {
-							Type:        schema.TypeString,
-							Optional:    true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						databaseDatashareSourceShareNameAttr: schema.StringAttribute{
 							Computed:    true,
 							Description: "The name of the datashare on the producer cluster",
-							StateFunc: func(val interface{}) string {
-								return strings.ToLower(val.(string))
-							},
 						},
-						databaseDatashareSourceNamespaceAttr: {
-							Type:        schema.TypeString,
-							Optional:    true,
+						databaseDatashareSourceNamespaceAttr: schema.StringAttribute{
 							Computed:    true,
 							Description: "The namespace (guid) of the producer cluster",
-							StateFunc: func(val interface{}) string {
-								return strings.ToLower(val.(string))
-							},
 						},
-						databaseDatashareSourceAccountAttr: {
-							Type:        schema.TypeString,
-							Optional:    true,
+						databaseDatashareSourceAccountAttr: schema.StringAttribute{
 							Computed:    true,
 							Description: "The AWS account ID of the producer cluster.",
 						},
@@ -68,7 +87,22 @@ func dataSourceRedshiftDatabase() *schema.Resource {
 	}
 }
 
-func dataSourceRedshiftDatabaseRead(db *DBConnection, d *schema.ResourceData) error {
+func (d *databaseDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+	d.configureDataSource(req, resp)
+}
+
+func (d *databaseDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var model databaseDataSourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := d.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
 	var id, owner, connLimit, databaseType, shareName, producerAccount, producerNamespace string
 
 	err := db.QueryRow(`SELECT
@@ -88,32 +122,45 @@ LEFT JOIN pg_user_info
 LEFT JOIN svv_datashares
 	ON (svv_redshift_databases.database_name = svv_datashares.consumer_database AND svv_redshift_databases.database_type = 'shared' AND svv_datashares.share_type = 'INBOUND')
 WHERE svv_redshift_databases.database_name = $1
-	`, d.Get(databaseNameAttr).(string)).Scan(&id, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
+	`, strings.ToLower(model.Name.ValueString())).Scan(&id, &owner, &connLimit, &databaseType, &shareName, &producerAccount, &producerNamespace)
 
 	if err != nil {
-		return err
+		resp.Diagnostics.AddError("Unable to read the database", err.Error())
+		return
 	}
 
 	connLimitNumber := -1
 	if connLimit != "UNLIMITED" {
 		if connLimitNumber, err = strconv.Atoi(connLimit); err != nil {
-			return err
+			resp.Diagnostics.AddError("Unable to read the database connection limit", err.Error())
+			return
 		}
 	}
 
-	d.SetId(id)
-	d.Set(databaseOwnerAttr, owner)
-	d.Set(databaseConnLimitAttr, connLimitNumber)
-
-	dataShareConfiguration := make([]map[string]interface{}, 0, 1)
+	datashareSources := []attr.Value{}
 	if databaseType == "shared" {
-		config := make(map[string]interface{})
-		config[databaseDatashareSourceShareNameAttr] = &shareName
-		config[databaseDatashareSourceAccountAttr] = &producerAccount
-		config[databaseDatashareSourceNamespaceAttr] = &producerNamespace
-		dataShareConfiguration = append(dataShareConfiguration, config)
+		source, diags := types.ObjectValue(datashareSourceAttributeTypes, map[string]attr.Value{
+			databaseDatashareSourceShareNameAttr: types.StringValue(shareName),
+			databaseDatashareSourceNamespaceAttr: types.StringValue(producerNamespace),
+			databaseDatashareSourceAccountAttr:   types.StringValue(producerAccount),
+		})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		datashareSources = append(datashareSources, source)
 	}
-	d.Set(databaseDatashareSourceAttr, dataShareConfiguration)
 
-	return nil
+	datashareSource, diags := types.ListValue(types.ObjectType{AttrTypes: datashareSourceAttributeTypes}, datashareSources)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	model.ID = types.StringValue(id)
+	model.Owner = types.StringValue(owner)
+	model.ConnectionLimit = types.Int64Value(int64(connLimitNumber))
+	model.DatashareSource = datashareSource
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }

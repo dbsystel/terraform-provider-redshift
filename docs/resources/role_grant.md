@@ -31,4 +31,4 @@ For more information, see [GRANT documentation](https://docs.aws.amazon.com/reds
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The role grant ID.

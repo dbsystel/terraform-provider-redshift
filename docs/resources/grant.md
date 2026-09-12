@@ -88,4 +88,4 @@ resource "redshift_grant" "public" {
 
 ### Read-Only
 
-- `id` (String) The ID of this resource.
+- `id` (String) The grant ID.

@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/lib/pq"
 )
 
@@ -166,15 +167,14 @@ func TestWarnOnShadowedPGOptions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("PGOPTIONS", tt.pgOptions)
 
-			raw := map[string]interface{}{}
-			if tt.options != nil {
-				raw["session_parameters"] = tt.options
+			sessionParameters := map[string]string{}
+			for name, value := range tt.options {
+				sessionParameters[name] = value.(string)
 			}
-			d := schema.TestResourceDataRaw(t, Provider().Schema, raw)
 
-			diags := warnOnShadowedPGOptions(d)
+			diags := warnOnShadowedPGOptions(sessionParameters)
 			if tt.wantWarn {
-				if len(diags) != 1 || diags[0].Severity != diag.Warning {
+				if len(diags) != 1 || diags[0].Severity() != diag.SeverityWarning {
 					t.Fatalf("expected exactly one warning, got %#v", diags)
 				}
 				return
@@ -192,33 +192,21 @@ func TestWarnOnShadowedPGOptions(t *testing.T) {
 func TestDataApiConfigurationHasNoConflicts(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
-	raw := map[string]interface{}{
-		"data_api": []interface{}{map[string]interface{}{
-			"workgroup_name": "my-workgroup",
-			"region":         "us-west-2",
-		}},
-	}
-
-	for _, d := range Provider().Validate(terraform.NewResourceConfigRaw(raw)) {
-		t.Errorf("unexpected diagnostic: %s: %s (path %v)", d.Summary, d.Detail, d.AttributePath)
+	for _, d := range errorDiagnostics(validateProviderConfig(t, testDataApiArguments())) {
+		t.Errorf("unexpected diagnostic: %s: %s (path %v)", d.Summary, d.Detail, d.Attribute)
 	}
 }
 
 func TestSessionParametersConflictWithDataApi(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
-	raw := map[string]interface{}{
-		"data_api": []interface{}{map[string]interface{}{
-			"workgroup_name": "my-workgroup",
-			"region":         "us-west-2",
-		}},
-		"session_parameters": map[string]interface{}{"query_group": "superuser"},
-	}
+	arguments := testDataApiArguments()
+	arguments["session_parameters"] = map[string]interface{}{"query_group": "superuser"}
 
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	diags := errorDiagnostics(validateProviderConfig(t, arguments))
 	var found bool
 	for _, d := range diags {
-		if strings.Contains(d.Summary, "Conflicting configuration arguments") && strings.Contains(d.Detail, "session_parameters") {
+		if strings.Contains(d.Detail, "session_parameters") {
 			found = true
 		}
 	}
@@ -235,18 +223,11 @@ func TestUnusableConnectTimeoutEnvIsIgnored(t *testing.T) {
 			unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST")
 			t.Setenv("PGCONNECT_TIMEOUT", value)
 
-			raw := map[string]interface{}{
-				"data_api": []interface{}{map[string]interface{}{
-					"workgroup_name": "my-workgroup",
-					"region":         "us-west-2",
-				}},
-			}
-			for _, d := range Provider().Validate(terraform.NewResourceConfigRaw(raw)) {
+			for _, d := range errorDiagnostics(validateProviderConfig(t, testDataApiArguments())) {
 				t.Errorf("data_api configuration rejected: %s: %s", d.Summary, d.Detail)
 			}
 
-			d := schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{"host": "redshift.example.com"})
-			if got := d.Get("connect_timeout").(int); got != defaultConnectTimeoutInSeconds {
+			if got := connectTimeoutDefault(); got != defaultConnectTimeoutInSeconds {
 				t.Errorf("connect_timeout = %d, want the default %d", got, defaultConnectTimeoutInSeconds)
 			}
 		})
@@ -258,8 +239,10 @@ func TestUnusableConnectTimeoutEnvIsIgnored(t *testing.T) {
 func TestNegativeConnectTimeoutIsRejected(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
-	raw := map[string]interface{}{"host": "redshift.example.com", "connect_timeout": -1}
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	diags := errorDiagnostics(validateProviderConfig(t, map[string]interface{}{
+		"host":            "redshift.example.com",
+		"connect_timeout": -1,
+	}))
 	if len(diags) == 0 {
 		t.Fatal("expected connect_timeout = -1 to be rejected, got no diagnostics")
 	}
@@ -270,18 +253,17 @@ func TestNegativeConnectTimeoutIsRejected(t *testing.T) {
 func TestInvalidSessionParametersFailValidation(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
-	raw := map[string]interface{}{
+	diags := errorDiagnostics(validateProviderConfig(t, map[string]interface{}{
 		"host":               "redshift.example.com",
 		"session_parameters": map[string]interface{}{"query_group": "bad value"},
-	}
-	diags := Provider().Validate(terraform.NewResourceConfigRaw(raw))
+	}))
 	if len(diags) == 0 {
 		t.Fatal("expected invalid options to be rejected at validate time, got no diagnostics")
 	}
 	if !strings.Contains(diags[0].Detail, "query_group") {
 		t.Errorf("diagnostic does not name the offending option: %#v", diags[0])
 	}
-	if len(diags[0].AttributePath) == 0 {
+	if diags[0].Attribute == nil {
 		t.Errorf("diagnostic carries no attribute path: %#v", diags[0])
 	}
 }
@@ -291,12 +273,12 @@ func TestInvalidSessionParametersFailValidation(t *testing.T) {
 func TestInvalidSessionParametersFailProviderConfiguration(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 
-	d := schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
+	diags := errorDiagnostics(configureProvider(t, map[string]interface{}{
 		"host":               "redshift.example.com",
 		"session_parameters": map[string]interface{}{"query_group": "bad value"},
-	})
-	if _, err := getConfigFromResourceData(d, nil); err == nil {
-		t.Fatal("expected an error for an invalid session parameter, got nil")
+	}))
+	if len(diags) == 0 {
+		t.Fatal("expected an error for an invalid session parameter, got none")
 	}
 }
 
@@ -305,20 +287,18 @@ func TestProviderConfigureWarnsAboutShadowedPGOptions(t *testing.T) {
 	unsetAndSetEnvVars(t, "AWS_REGION", "AWS_DEFAULT_REGION", "REDSHIFT_HOST", "PGCONNECT_TIMEOUT")
 	t.Setenv("PGOPTIONS", "-c search_path=someschema")
 
-	d := schema.TestResourceDataRaw(t, Provider().Schema, map[string]interface{}{
+	diags := configureProvider(t, map[string]interface{}{
 		"host":               "redshift.example.com",
 		"session_parameters": map[string]interface{}{"query_group": "superuser"},
 	})
-
-	_, diags := providerConfigure(context.Background(), d)
 	var found bool
 	for _, diagnostic := range diags {
-		if diagnostic.Severity == diag.Warning && strings.Contains(diagnostic.Summary, "PGOPTIONS") {
+		if diagnostic.Severity == tfprotov6.DiagnosticSeverityWarning && strings.Contains(diagnostic.Summary, "PGOPTIONS") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected a PGOPTIONS warning from providerConfigure, got %#v", diags)
+		t.Fatalf("expected a PGOPTIONS warning when the provider is configured, got %#v", diags)
 	}
 }
 
@@ -384,13 +364,23 @@ func TestExplicitConfigurationBeatsEnvironment(t *testing.T) {
 				t.Setenv("PGOPTIONS", tt.pgOptions)
 			}
 
-			raw := map[string]interface{}{"host": "redshift.example.com", "username": "myuser", "database": "mydb"}
-			for key, value := range tt.config {
-				raw[key] = value
+			model := &frameworkProviderModel{
+				Host:     types.StringValue("redshift.example.com"),
+				Username: types.StringValue("myuser"),
+				Database: types.StringValue("mydb"),
 			}
-			d := schema.TestResourceDataRaw(t, Provider().Schema, raw)
+			if connectTimeout, ok := tt.config["connect_timeout"]; ok {
+				model.ConnectTimeout = types.Int64Value(int64(connectTimeout.(int)))
+			}
+			if sessionParameters, ok := tt.config["session_parameters"]; ok {
+				model.SessionParameters = testSessionParametersValue(t, sessionParameters.(map[string]interface{}))
+			}
 
-			config, err := getConfigFromPqResourceData(d, "mydb", 20, nil)
+			settings, diags := model.settings(context.Background())
+			if diags.HasError() {
+				t.Fatalf("unexpected diagnostics: %v", diags)
+			}
+			config, err := settings.newConfig(nil)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -413,7 +403,7 @@ func TestExplicitConfigurationBeatsEnvironment(t *testing.T) {
 	}
 }
 
-func TestSessionParametersFromResourceData(t *testing.T) {
+func TestSessionParametersFromProviderConfiguration(t *testing.T) {
 	unsetAndSetEnvVars(t, "PGCONNECT_TIMEOUT")
 	tests := []struct {
 		name        string
@@ -499,25 +489,25 @@ func TestSessionParametersFromResourceData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			raw := map[string]interface{}{}
+			model := &frameworkProviderModel{Host: types.StringValue("redshift.example.com")}
 			if tt.options != nil {
-				raw["session_parameters"] = tt.options
+				model.SessionParameters = testSessionParametersValue(t, tt.options)
 			}
-			d := schema.TestResourceDataRaw(t, Provider().Schema, raw)
 
-			got, err := sessionParametersFromResourceData(d)
+			settings, diags := model.settings(context.Background())
 			if tt.wantErrPart != "" {
-				if err == nil {
-					t.Fatalf("expected an error containing %q, got nil", tt.wantErrPart)
+				if !diags.HasError() {
+					t.Fatalf("expected an error containing %q, got none", tt.wantErrPart)
 				}
-				if !strings.Contains(err.Error(), tt.wantErrPart) {
-					t.Errorf("error = %v, want it to contain %q", err, tt.wantErrPart)
+				if !strings.Contains(diags.Errors()[0].Detail(), tt.wantErrPart) {
+					t.Errorf("error = %v, want it to contain %q", diags.Errors()[0], tt.wantErrPart)
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if diags.HasError() {
+				t.Fatalf("unexpected diagnostics: %v", diags)
 			}
+			got := settings.SessionParameters
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d options, want %d (got %v)", len(got), len(tt.want), got)
 			}
@@ -581,4 +571,28 @@ func TestAccSessionParametersAreApplied(t *testing.T) {
 			t.Errorf("%s = %q, want %q", setting, got, want)
 		}
 	}
+}
+
+// testDataApiArguments is a minimal, valid Data API provider configuration.
+func testDataApiArguments() map[string]interface{} {
+	return map[string]interface{}{
+		"data_api": []interface{}{map[string]interface{}{
+			"workgroup_name": "my-workgroup",
+			"region":         "us-west-2",
+		}},
+	}
+}
+
+// testSessionParametersValue builds the session_parameters argument value.
+func testSessionParametersValue(t *testing.T, options map[string]interface{}) types.Map {
+	t.Helper()
+	elements := map[string]attr.Value{}
+	for name, value := range options {
+		elements[name] = types.StringValue(value.(string))
+	}
+	value, diags := types.MapValue(types.StringType, elements)
+	if diags.HasError() {
+		t.Fatalf("could not build the session parameters: %v", diags)
+	}
+	return value
 }

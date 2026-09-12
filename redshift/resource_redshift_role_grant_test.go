@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftRoleGrant_Basic(t *testing.T) {
@@ -44,9 +44,9 @@ resource "redshift_role_grant" "role" {
 `, randomObjectName, userName, secondRoleName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftRoleGrantDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftRoleGrantDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -110,9 +110,9 @@ resource "redshift_role_grant" "combined" {
 }`
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftRoleGrantDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftRoleGrantDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -151,7 +151,7 @@ resource "redshift_role_grant" "combined" {
 }
 
 func testAccCheckRedshiftRoleGrantDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_role_grant" {
@@ -174,7 +174,7 @@ func testAccCheckRedshiftRoleGrantDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftRoleGrantExists(grantToType, entityTo, roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleGrantExists(client, generateRoleGrantID(roleName, grantToType, entityTo))
 		if err != nil {
@@ -191,7 +191,7 @@ func testAccCheckRedshiftRoleGrantExists(grantToType, entityTo, roleName string)
 
 func testAccCheckRedshiftRoleGrantNotExists(grantToType, entityTo, roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleGrantExists(client, generateRoleGrantID(roleName, grantToType, entityTo))
 		if err != nil {

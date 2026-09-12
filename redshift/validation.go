@@ -2,8 +2,6 @@ package redshift
 
 import (
 	"regexp"
-
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 var reservedWords = []string{
@@ -169,14 +167,7 @@ var dbGroupAcceptableCharacters = regexp.MustCompile("[a-z1-9_+.@-]{1,64}")
 var startsWithLetter = regexp.MustCompile("[a-zA-Z].*")
 
 // Validation rules are specified at https://docs.aws.amazon.com/redshift/latest/APIReference/API_GetClusterCredentials.html
-// admittedly, some of these are a bit redundant
-var dbGroupValidate = validation.All(
-	validation.StringLenBetween(1, 64),
-	validation.StringMatch(dbGroupAcceptableCharacters, "Must contain only lowercase letters, numbers, underscore, plus sign, period (dot), at symbol (@), or hyphen."),
-	validation.StringMatch(startsWithLetter, "First character must be a letter."),
-	validation.StringDoesNotContainAny(":/"),
-	validation.StringNotInSlice(reservedWords, true),
-)
+// admittedly, some of these are a bit redundant; see dbGroupValidators.
 
 // Session parameter values are interpolated into the whitespace-separated argument list
 // carried by the libpq `options` connection parameter. Redshift splits that list using

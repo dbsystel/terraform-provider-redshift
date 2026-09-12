@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftAssumeRoleGrant_BasicUser(t *testing.T) {
@@ -30,9 +30,9 @@ resource "redshift_assumerole_grant" "grant" {
 `, userName, iamRoleArn)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -68,9 +68,9 @@ resource "redshift_assumerole_grant" "grant" {
 `, roleName, iamRoleArn)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      func(s *terraform.State) error { return nil },
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             func(s *terraform.State) error { return nil },
 		Steps: []resource.TestStep{
 			{
 				Config: config,

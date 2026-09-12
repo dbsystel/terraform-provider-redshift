@@ -3,8 +3,6 @@ package redshift
 import (
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-
 	_ "github.com/mmichaelb/redshift-data-sql-driver"
 )
 
@@ -37,24 +35,18 @@ func buildConnStrFromDataApiClusterConfig(clusterIdentifier, username, database,
 	)
 }
 
-func getConfigFromDataApiResourceData(d *schema.ResourceData, database string) (*Config, error) {
-	workgroupName, workgroupNameOk := d.GetOk("data_api.0.workgroup_name")
-	clusterIdentifier, clusterIdentifierOk := d.GetOk("data_api.0.cluster_identifier")
-	region, regionOk := d.GetOk("data_api.0.region")
-
-	if !regionOk {
+func (s *providerSettings) dataApiConfig() (*Config, error) {
+	if s.DataApi.Region == "" {
 		return nil, fmt.Errorf("data_api configuration requires region to be set")
 	}
 
-	if clusterIdentifierOk {
-		username := d.Get("data_api.0.username").(string)
-		// Data API connections are non-pooled; one connection is sufficient.
-		return NewDataApiClusterConfig(clusterIdentifier.(string), username, database, region.(string), 1)
+	// Data API connections are non-pooled; one connection is sufficient.
+	if s.DataApi.ClusterIdentifier != "" {
+		return NewDataApiClusterConfig(s.DataApi.ClusterIdentifier, s.DataApi.Username, s.Database, s.DataApi.Region, 1)
 	}
 
-	if workgroupNameOk {
-		// Data API connections are non-pooled; one connection is sufficient.
-		return NewDataApiConfig(workgroupName.(string), database, region.(string), 1), nil
+	if s.DataApi.WorkgroupName != "" {
+		return NewDataApiConfig(s.DataApi.WorkgroupName, s.Database, s.DataApi.Region, 1), nil
 	}
 
 	return nil, fmt.Errorf("data_api configuration requires either workgroup_name or cluster_identifier to be set")

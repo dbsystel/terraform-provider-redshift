@@ -1,13 +1,21 @@
 package redshift
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
@@ -21,8 +29,37 @@ const (
 	dataShareSchemasAttr           = "schemas"
 )
 
-func redshiftDatashare() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ resource.Resource                = &datashareResource{}
+	_ resource.ResourceWithConfigure   = &datashareResource{}
+	_ resource.ResourceWithImportState = &datashareResource{}
+)
+
+func newDatashareResource() resource.Resource {
+	return &datashareResource{}
+}
+
+type datashareResource struct {
+	frameworkClient
+}
+
+type datashareResourceModel struct {
+	ID                 types.String `tfsdk:"id"`
+	Name               types.String `tfsdk:"name"`
+	Owner              types.String `tfsdk:"owner"`
+	PubliclyAccessible types.Bool   `tfsdk:"publicly_accessible"`
+	ProducerAccount    types.String `tfsdk:"producer_account"`
+	ProducerNamespace  types.String `tfsdk:"producer_namespace"`
+	Created            types.String `tfsdk:"created"`
+	Schemas            types.Set    `tfsdk:"schemas"`
+}
+
+func (r *datashareResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_datashare"
+}
+
+func (r *datashareResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: `
 Defines a Redshift datashare. Datashares allows a Redshift cluster (the "consumer") to
 read data stored in another Redshift cluster (the "producer"). For more information, see
@@ -33,114 +70,143 @@ The redshift_datashare resource should be defined on the producer cluster.
 Note: Data sharing is only supported on certain Redshift instance families,
 such as RA3.
 `,
-		CreateContext: ResourceFunc(resourceRedshiftDatashareCreate),
-		ReadContext:   ResourceFunc(resourceRedshiftDatashareRead),
-		UpdateContext: ResourceFunc(resourceRedshiftDatashareUpdate),
-		DeleteContext: ResourceFunc(resourceRedshiftDatashareDelete),
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
-		Schema: map[string]*schema.Schema{
-			dataShareNameAttr: {
-				Type:        schema.TypeString,
-				Description: "The name of the datashare.",
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The datashare ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			dataShareNameAttr: schema.StringAttribute{
 				Required:    true,
-				ForceNew:    true,
-				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
+				Description: "The name of the datashare.",
+				PlanModifiers: []planmodifier.String{
+					normalizeString(strings.ToLower),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			dataShareOwnerAttr: {
-				Type:        schema.TypeString,
+			dataShareOwnerAttr: schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
 				Description: "The user who owns the datashare.",
-				Optional:    true,
-				Computed:    true,
-				StateFunc: func(val interface{}) string {
-					return strings.ToLower(val.(string))
+				PlanModifiers: []planmodifier.String{
+					normalizeString(strings.ToLower),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			dataSharePublicAccessibleAttr: {
-				Type:        schema.TypeBool,
+			dataSharePublicAccessibleAttr: schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 				Description: "Specifies whether the datashare can be shared to clusters that are publicly accessible. Default is `false`.",
-				Optional:    true,
-				Default:     false,
 			},
-			dataShareProducerAccountAttr: {
-				Type:        schema.TypeString,
+			dataShareProducerAccountAttr: schema.StringAttribute{
+				Computed:    true,
 				Description: "The ID for the datashare producer account.",
-				Computed:    true,
 			},
-			dataShareProducerNamespaceAttr: {
-				Type:        schema.TypeString,
+			dataShareProducerNamespaceAttr: schema.StringAttribute{
+				Computed:    true,
 				Description: "The unique cluster identifier for the datashare producer cluster.",
-				Computed:    true,
 			},
-			dataShareCreatedAttr: {
-				Type:        schema.TypeString,
+			dataShareCreatedAttr: schema.StringAttribute{
+				Computed:    true,
 				Description: "The date when datashare was created",
-				Computed:    true,
 			},
-			dataShareSchemasAttr: {
-				Type:        schema.TypeSet,
+			dataShareSchemasAttr: schema.SetAttribute{
 				Optional:    true,
+				ElementType: types.StringType,
 				Description: "Defines which schemas are exposed to the data share.",
-				Set:         schema.HashString,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-					StateFunc: func(val interface{}) string {
-						return strings.ToLower(val.(string))
-					},
+				PlanModifiers: []planmodifier.Set{
+					normalizeSet(strings.ToLower),
 				},
 			},
 		},
 	}
 }
 
-func resourceRedshiftDatashareCreate(db *DBConnection, d *schema.ResourceData) error {
+func (r *datashareResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
+}
+
+func (r *datashareResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+func (r *datashareResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model datashareResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	schemas := stringsFromSet(ctx, model.Schemas, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	owner := ""
+	if !model.Owner.IsNull() && !model.Owner.IsUnknown() {
+		owner = model.Owner.ValueString()
+	}
+
+	shareID, err := createDatashare(db, model.Name.ValueString(), owner, model.PubliclyAccessible.ValueBool(), schemas)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create the datashare", err.Error())
+		return
+	}
+
+	model.ID = types.StringValue(shareID)
+	if !r.refresh(ctx, db, &model, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func createDatashare(db *DBConnection, shareName, owner string, publiclyAccessible bool, schemas []string) (string, error) {
 	tx, err := startTransaction(db.client)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer deferredRollback(tx)
 
-	shareName := d.Get(dataShareNameAttr).(string)
-
-	query := fmt.Sprintf("CREATE DATASHARE %s SET PUBLICACCESSIBLE = %t", pq.QuoteIdentifier(shareName), d.Get(dataSharePublicAccessibleAttr).(bool))
+	query := fmt.Sprintf("CREATE DATASHARE %s SET PUBLICACCESSIBLE = %t", pq.QuoteIdentifier(shareName), publiclyAccessible)
 	log.Printf("[DEBUG] %s\n", query)
 	if _, err := tx.Exec(query); err != nil {
-		return err
+		return "", err
 	}
 
-	var shareId string
+	var shareID string
 	query = "SELECT share_id FROM SVV_DATASHARES WHERE share_type = 'OUTBOUND' AND share_name = $1"
 	log.Printf("[DEBUG] %s, $1=%s\n", query, strings.ToLower(shareName))
-	if err := tx.QueryRow(query, strings.ToLower(shareName)).Scan(&shareId); err != nil {
-		return err
+	if err := tx.QueryRow(query, strings.ToLower(shareName)).Scan(&shareID); err != nil {
+		return "", err
 	}
 
-	d.SetId(shareId)
-
-	if owner, ownerIsSet := d.GetOk(dataShareOwnerAttr); ownerIsSet {
-		query = fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(strings.ToLower(shareName)), pq.QuoteIdentifier(strings.ToLower(owner.(string))))
+	if owner != "" {
+		query = fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(strings.ToLower(shareName)), pq.QuoteIdentifier(strings.ToLower(owner)))
 		log.Printf("[DEBUG] %s\n", query)
-		_, err = tx.Exec(query)
-		if err != nil {
-			return err
+		if _, err := tx.Exec(query); err != nil {
+			return "", err
 		}
 	}
 
-	for _, dataShareSchema := range d.Get(dataShareSchemasAttr).(*schema.Set).List() {
-		err = addSchemaToDatashare(tx, shareName, dataShareSchema.(string))
-		if err != nil {
-			return err
+	for _, schemaName := range schemas {
+		if err := addSchemaToDatashare(tx, shareName, schemaName); err != nil {
+			return "", err
 		}
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
+		return "", fmt.Errorf("could not commit transaction: %w", err)
 	}
 
-	return resourceRedshiftDatashareRead(db, d)
+	return shareID, nil
 }
 
 func addSchemaToDatashare(tx *sql.Tx, shareName string, schemaName string) error {
@@ -238,13 +304,33 @@ func resourceRedshiftDatashareRemoveSchema(tx *sql.Tx, shareName string, schemaN
 	return nil
 }
 
-func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) error {
+func (r *datashareResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model datashareResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	if !r.refresh(ctx, db, &model, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+// refresh fills the model from the cluster. It reports whether the caller may go on.
+func (r *datashareResource) refresh(ctx context.Context, db *DBConnection, model *datashareResourceModel, diagnostics *diag.Diagnostics) bool {
 	var shareName, owner, producerAccount, producerNamespace, created string
 	var publicAccessible bool
 
 	tx, err := startTransaction(db.client)
 	if err != nil {
-		return err
+		diagnostics.AddError("Unable to read the datashare", err.Error())
+		return false
 	}
 	defer deferredRollback(tx)
 
@@ -260,31 +346,45 @@ func resourceRedshiftDatashareRead(db *DBConnection, d *schema.ResourceData) err
 	LEFT JOIN pg_user ON svv_datashares.share_owner = pg_user.usesysid
 	WHERE share_type = 'OUTBOUND'
 	AND share_id = $1`
-	log.Printf("[DEBUG] %s, $1=%s\n", query, d.Id())
-	err = tx.QueryRow(query, d.Id()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created)
-	if err != nil {
-		return err
+	log.Printf("[DEBUG] %s, $1=%s\n", query, model.ID.ValueString())
+	if err := tx.QueryRow(query, model.ID.ValueString()).Scan(&shareName, &owner, &publicAccessible, &producerAccount, &producerNamespace, &created); err != nil {
+		diagnostics.AddError("Unable to read the datashare", err.Error())
+		return false
 	}
 
-	d.Set(dataShareNameAttr, shareName)
-	d.Set(dataShareOwnerAttr, owner)
-	d.Set(dataSharePublicAccessibleAttr, publicAccessible)
-	d.Set(dataShareProducerAccountAttr, producerAccount)
-	d.Set(dataShareProducerNamespaceAttr, producerNamespace)
-	d.Set(dataShareCreatedAttr, created)
-
-	if err = readDatashareSchemas(tx, shareName, d); err != nil {
-		return err
+	schemas, err := readDatashareSchemas(tx, shareName)
+	if err != nil {
+		diagnostics.AddError("Unable to read the datashare schemas", err.Error())
+		return false
 	}
 
 	if err = tx.Commit(); err != nil {
-		return err
+		diagnostics.AddError("Unable to read the datashare", err.Error())
+		return false
 	}
 
-	return nil
+	model.Name = types.StringValue(shareName)
+	model.Owner = types.StringValue(owner)
+	model.PubliclyAccessible = types.BoolValue(publicAccessible)
+	model.ProducerAccount = types.StringValue(producerAccount)
+	model.ProducerNamespace = types.StringValue(producerNamespace)
+	model.Created = types.StringValue(created)
+
+	// Schemas that the configuration does not manage stay unset, so that omitting the
+	// argument does not plan a change on every run.
+	if len(schemas) > 0 || !model.Schemas.IsNull() {
+		shared, diags := types.SetValueFrom(ctx, types.StringType, schemas)
+		diagnostics.Append(diags...)
+		if diagnostics.HasError() {
+			return false
+		}
+		model.Schemas = shared
+	}
+
+	return true
 }
 
-func readDatashareSchemas(tx *sql.Tx, shareName string, d *schema.ResourceData) error {
+func readDatashareSchemas(tx *sql.Tx, shareName string) ([]string, error) {
 	query := `
 	SELECT
 		object_name
@@ -296,115 +396,117 @@ func readDatashareSchemas(tx *sql.Tx, shareName string, d *schema.ResourceData) 
 	log.Printf("[DEBUG] %s, $1=%s\n", query, shareName)
 	rows, err := tx.Query(query, shareName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	schemas := schema.NewSet(schema.HashString, nil)
+	var schemas []string
 	for rows.Next() {
 		var schemaName string
 		if err = rows.Scan(&schemaName); err != nil {
-			return err
+			return nil, err
 		}
-		schemas.Add(schemaName)
+		schemas = append(schemas, schemaName)
 	}
-	d.Set(dataShareSchemasAttr, schemas)
-	return nil
+	return schemas, rows.Err()
 }
 
-func resourceRedshiftDatashareUpdate(db *DBConnection, d *schema.ResourceData) error {
+func (r *datashareResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state datashareResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	oldSchemas := stringsFromSet(ctx, state.Schemas, &resp.Diagnostics)
+	newSchemas := stringsFromSet(ctx, plan.Schemas, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := updateDatashare(plan, state, db, oldSchemas, newSchemas); err != nil {
+		resp.Diagnostics.AddError("Unable to update the datashare", err.Error())
+		return
+	}
+
+	plan.ID = state.ID
+	if !r.refresh(ctx, db, &plan, &resp.Diagnostics) {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func updateDatashare(plan, state datashareResourceModel, db *DBConnection, oldSchemas, newSchemas []string) error {
 	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
 	}
 	defer deferredRollback(tx)
 
-	if err := setDatashareOwner(tx, d); err != nil {
-		return err
+	shareName := plan.Name.ValueString()
+
+	if !plan.Owner.IsUnknown() && plan.Owner.ValueString() != state.Owner.ValueString() {
+		newOwner := "CURRENT_USER"
+		if plan.Owner.ValueString() != "" {
+			newOwner = pq.QuoteIdentifier(plan.Owner.ValueString())
+		}
+		query := fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(shareName), newOwner)
+		log.Printf("[DEBUG] %s\n", query)
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating datashare OWNER: %w", err)
+		}
 	}
 
-	if err := setDatasharePubliclyAccessble(tx, d); err != nil {
-		return err
+	if plan.PubliclyAccessible.ValueBool() != state.PubliclyAccessible.ValueBool() {
+		query := fmt.Sprintf("ALTER DATASHARE %s SET PUBLICACCESSIBLE %t", pq.QuoteIdentifier(shareName), plan.PubliclyAccessible.ValueBool())
+		log.Printf("[DEBUG] %s\n", query)
+		if _, err := tx.Exec(query); err != nil {
+			return fmt.Errorf("error updating datashare PUBLICACCESSBILE: %w", err)
+		}
 	}
 
-	if err := setDatashareSchemas(tx, d); err != nil {
-		return err
+	removed, added := diffStrings(oldSchemas, newSchemas)
+	for _, schemaName := range added {
+		if err := addSchemaToDatashare(tx, shareName, schemaName); err != nil {
+			return err
+		}
+	}
+	for _, schemaName := range removed {
+		if err := removeSchemaFromDatashare(tx, shareName, schemaName); err != nil {
+			return err
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
-
-	return resourceRedshiftDatashareRead(db, d)
-}
-
-func setDatashareOwner(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(dataShareOwnerAttr) {
-		return nil
-	}
-	shareName := d.Get(dataShareNameAttr).(string)
-	_, newRaw := d.GetChange(dataShareOwnerAttr)
-	newValue := newRaw.(string)
-	if newValue == "" {
-		newValue = "CURRENT_USER"
-	} else {
-		newValue = pq.QuoteIdentifier(newValue)
-	}
-
-	query := fmt.Sprintf("ALTER DATASHARE %s OWNER TO %s", pq.QuoteIdentifier(shareName), newValue)
-	log.Printf("[DEBUG] %s\n", query)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating datashare OWNER: %w", err)
-	}
 	return nil
 }
 
-func setDatasharePubliclyAccessble(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(dataSharePublicAccessibleAttr) {
-		return nil
+func (r *datashareResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model datashareResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	shareName := d.Get(dataShareNameAttr).(string)
-	newValue := d.Get(dataSharePublicAccessibleAttr).(bool)
-	query := fmt.Sprintf("ALTER DATASHARE %s SET PUBLICACCESSIBLE %t", pq.QuoteIdentifier(shareName), newValue)
-	log.Printf("[DEBUG] %s\n", query)
-	if _, err := tx.Exec(query); err != nil {
-		return fmt.Errorf("error updating datashare PUBLICACCESSBILE: %w", err)
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
 	}
-	return nil
+
+	if err := deleteDatashare(db, model.ID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Unable to delete the datashare", err.Error())
+	}
 }
 
-func setDatashareSchemas(tx *sql.Tx, d *schema.ResourceData) error {
-	if !d.HasChange(dataShareSchemasAttr) {
-		return nil
-	}
-	before, after := d.GetChange(dataShareSchemasAttr)
-	if before == nil {
-		before = schema.NewSet(schema.HashString, nil)
-	}
-	if after == nil {
-		after = schema.NewSet(schema.HashString, nil)
-	}
-
-	add := after.(*schema.Set).Difference(before.(*schema.Set))
-	remove := before.(*schema.Set).Difference(after.(*schema.Set))
-
-	shareName := d.Get(dataShareNameAttr).(string)
-	for _, s := range add.List() {
-		if err := addSchemaToDatashare(tx, shareName, s.(string)); err != nil {
-			return err
-		}
-	}
-	for _, s := range remove.List() {
-		if err := removeSchemaFromDatashare(tx, shareName, s.(string)); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) error {
+func deleteDatashare(db *DBConnection, shareID string) error {
 	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
@@ -413,17 +515,16 @@ func resourceRedshiftDatashareDelete(db *DBConnection, d *schema.ResourceData) e
 
 	var shareName string
 	query := "SELECT share_name FROM svv_datashares WHERE share_type='OUTBOUND' AND share_id=$1"
-	if err := tx.QueryRow(query, d.Id()).Scan(&shareName); err != nil {
+	if err := tx.QueryRow(query, shareID).Scan(&shareName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("[WARN] data share with id %s does not exist.\n", d.Id())
+			log.Printf("[WARN] data share with id %s does not exist.\n", shareID)
 			return nil
 		}
 		return err
 	}
 	query = fmt.Sprintf("DROP DATASHARE %s", pq.QuoteIdentifier(shareName))
 	log.Printf("[DEBUG] %s\n", query)
-	_, err = tx.Exec(query)
-	if err != nil {
+	if _, err = tx.Exec(query); err != nil {
 		return err
 	}
 

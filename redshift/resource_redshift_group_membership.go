@@ -1,56 +1,117 @@
 package redshift
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
-func redshiftGroupMembership() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ resource.Resource                = &groupMembershipResource{}
+	_ resource.ResourceWithConfigure   = &groupMembershipResource{}
+	_ resource.ResourceWithImportState = &groupMembershipResource{}
+)
+
+func newGroupMembershipResource() resource.Resource {
+	return &groupMembershipResource{}
+}
+
+type groupMembershipResource struct {
+	frameworkClient
+}
+
+type groupMembershipResourceModel struct {
+	ID    types.String `tfsdk:"id"`
+	Name  types.String `tfsdk:"name"`
+	Users types.Set    `tfsdk:"users"`
+}
+
+func (r *groupMembershipResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_group_membership"
+}
+
+func (r *groupMembershipResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: fmt.Sprintf(`
 Manages Redshift group memberships. Allows either to exclusively manage group memberships or to add members to an existing group. Note: this resource conflicts with the %s attribute of the %s resource
 `, "`users`", "`redshift_group`"),
-		CreateContext: ResourceFunc(resourceRedshiftGroupMembershipCreate),
-		ReadContext:   ResourceFunc(resourceRedshiftGroupMembershipRead),
-		UpdateContext: ResourceFunc(resourceRedshiftGroupMembershipUpdate),
-		DeleteContext: ResourceFunc(resourceRedshiftGroupMembershipDelete),
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
-		Schema: map[string]*schema.Schema{
-			groupNameAttr: {
-				Type:         schema.TypeString,
-				Required:     true,
-				Description:  "Name of the user group.",
-				ValidateFunc: validation.StringLenBetween(1, 127),
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The group membership ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
-			groupUsersAttr: {
-				Type:        schema.TypeSet,
+			groupNameAttr: schema.StringAttribute{
 				Required:    true,
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				Description: "Name of the user group.",
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 127),
+				},
+				// A renamed group is a different group: the old membership has to be
+				// dropped and the new one added, which the SDK resource did by hand.
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			groupUsersAttr: schema.SetAttribute{
+				Required:    true,
+				ElementType: types.StringType,
 				Description: "List of the user names to add to the group. Note: this resource does not check whether the specified users exist.",
+				Validators: []validator.Set{
+					setvalidator.SizeAtLeast(1),
+				},
 			},
 		},
 	}
 }
 
-func resourceRedshiftGroupMembershipCreate(db *DBConnection, d *schema.ResourceData) error {
-	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+func (r *groupMembershipResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
+}
 
-	if len(userNames) == 0 {
-		return fmt.Errorf("at least one user must be specified in %q", groupUsersAttr)
+func (r *groupMembershipResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+func (r *groupMembershipResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model groupMembershipResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	userNames := stringsFromSet(ctx, model.Users, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	groupName := model.Name.ValueString()
 	if err := addUsersToGroup(db, groupName, userNames); err != nil {
-		return err
+		resp.Diagnostics.AddError("Unable to add the users to the group", err.Error())
+		return
 	}
 
-	return resourceRedshiftGroupMembershipRead(db, d)
+	model.ID = types.StringValue(generateGroupMembershipId(groupName, userNames))
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
 func addUsersToGroup(db *DBConnection, group string, userNames []string) error {
@@ -64,13 +125,41 @@ func addUsersToGroup(db *DBConnection, group string, userNames []string) error {
 		return fmt.Errorf("could not add users %s to group %q: %w", userNamesParam, group, err)
 	}
 	return nil
-
 }
 
-func resourceRedshiftGroupMembershipRead(db *DBConnection, d *schema.ResourceData) error {
-	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+func (r *groupMembershipResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model groupMembershipResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	userNames := stringsFromSet(ctx, model.Users, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	groupName := model.Name.ValueString()
+	exists, err := groupMembershipExists(db, groupName, userNames)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to read the group membership", err.Error())
+		return
+	}
+	if !exists {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	model.ID = types.StringValue(generateGroupMembershipId(groupName, userNames))
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func groupMembershipExists(db *DBConnection, groupName string, userNames []string) (bool, error) {
 	userNamesParam := buildUserStringArray(userNames, true)
 
 	query := fmt.Sprintf(
@@ -80,81 +169,87 @@ func resourceRedshiftGroupMembershipRead(db *DBConnection, d *schema.ResourceDat
 
 	rows, err := db.Query(query)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer rows.Close()
-	if rows.Next() {
-		if err = rows.Err(); err != nil {
-			return fmt.Errorf("could not read group membership for group %q: %w", groupName, err)
-		}
-		d.SetId(generateGroupMembershipId(groupName, userNames))
-	} else {
-		d.SetId("")
+
+	exists := rows.Next()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("could not read group membership for group %q: %w", groupName, err)
 	}
-	return nil
+	return exists, nil
 }
 
-func resourceRedshiftGroupMembershipUpdate(db *DBConnection, d *schema.ResourceData) error {
-	rawUserNamesOld, rawUserNamesNew := d.GetChange(groupUsersAttr)
-	oldUserNames := parseUserNames(rawUserNamesOld)
-	newUserNames := parseUserNames(rawUserNamesNew)
-	if len(newUserNames) == 0 {
-		return fmt.Errorf("at least one user must be specified in %q", groupUsersAttr)
+func (r *groupMembershipResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state groupMembershipResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	if d.HasChange(groupNameAttr) {
-		if err := resourceRedshiftGroupMembershipDelete(db, d); err != nil {
-			return fmt.Errorf("error deleting group membership while updating the resource: %w", err)
-		}
-		if err := resourceRedshiftGroupMembershipCreate(db, d); err != nil {
-			return fmt.Errorf("error creating group membership while updating the resource: %w", err)
-		}
-		return nil
+
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
 	}
-	deletedUserNames, addedUserNames := calculateUserNamesDiff(oldUserNames, newUserNames)
-	if err := dropUsersFromGroup(db, d.Get(groupNameAttr).(string), deletedUserNames); err != nil {
-		return fmt.Errorf("error removing users from group while updating the resource: %w", err)
+
+	oldUserNames := stringsFromSet(ctx, state.Users, &resp.Diagnostics)
+	newUserNames := stringsFromSet(ctx, plan.Users, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	if err := addUsersToGroup(db, d.Get(groupNameAttr).(string), addedUserNames); err != nil {
-		return fmt.Errorf("error adding users to group while updating the resource: %w", err)
+
+	groupName := plan.Name.ValueString()
+	removed, added := diffStrings(oldUserNames, newUserNames)
+	if err := dropUsersFromGroup(db, groupName, removed); err != nil {
+		resp.Diagnostics.AddError("Unable to remove users from the group", err.Error())
+		return
 	}
-	return resourceRedshiftGroupMembershipRead(db, d)
+	if err := addUsersToGroup(db, groupName, added); err != nil {
+		resp.Diagnostics.AddError("Unable to add users to the group", err.Error())
+		return
+	}
+
+	plan.ID = types.StringValue(generateGroupMembershipId(groupName, newUserNames))
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-func calculateUserNamesDiff(oldUserNames, newUserNames []string) (deletedUserNames, addedUserNames []string) {
-	deletedUserNames = make([]string, 0)
-	addedUserNames = make([]string, 0)
-	for _, oldUserName := range oldUserNames {
-		found := false
-		for _, newUserName := range newUserNames {
-			if oldUserName == newUserName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			deletedUserNames = append(deletedUserNames, oldUserName)
+func diffStrings(before, after []string) (removed, added []string) {
+	removed = make([]string, 0)
+	added = make([]string, 0)
+	for _, beforeValue := range before {
+		if !slices.Contains(after, beforeValue) {
+			removed = append(removed, beforeValue)
 		}
 	}
-	for _, newUserName := range newUserNames {
-		found := false
-		for _, oldUserName := range oldUserNames {
-			if newUserName == oldUserName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			addedUserNames = append(addedUserNames, newUserName)
+	for _, afterValue := range after {
+		if !slices.Contains(before, afterValue) {
+			added = append(added, afterValue)
 		}
 	}
-	return deletedUserNames, addedUserNames
+	return removed, added
 }
 
-func resourceRedshiftGroupMembershipDelete(db *DBConnection, d *schema.ResourceData) error {
-	groupName := d.Get(groupNameAttr).(string)
-	userNames := parseUserNames(d.Get(groupUsersAttr))
+func (r *groupMembershipResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model groupMembershipResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	return dropUsersFromGroup(db, groupName, userNames)
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	userNames := stringsFromSet(ctx, model.Users, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := dropUsersFromGroup(db, model.Name.ValueString(), userNames); err != nil {
+		resp.Diagnostics.AddError("Unable to remove the users from the group", err.Error())
+	}
 }
 
 func dropUsersFromGroup(db *DBConnection, groupName string, userNames []string) error {
@@ -168,15 +263,6 @@ func dropUsersFromGroup(db *DBConnection, groupName string, userNames []string) 
 		return fmt.Errorf("could not remove users %s from group %q: %w", userNamesParam, groupName, err)
 	}
 	return nil
-}
-
-func parseUserNames(rawUserNames interface{}) []string {
-	rawUserNamesTyped := rawUserNames.(*schema.Set).List()
-	userNames := make([]string, len(rawUserNamesTyped))
-	for index, userNameRaw := range rawUserNamesTyped {
-		userNames[index] = userNameRaw.(string)
-	}
-	return userNames
 }
 
 func buildUserStringArray(userNames []string, encodeAsLiteral bool) string {

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
@@ -68,9 +68,9 @@ func TestAccRedshiftDefaultPrivileges_Basic(t *testing.T) {
 		}
 		`, groupName, userName, rootUsername, roleName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      testAccCheckDefaultPrivilegesDestory(defaultPrivilegesAllSchemasID, 100, "r", groupName),
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             testAccCheckDefaultPrivilegesDestory(defaultPrivilegesAllSchemasID, 100, "r", groupName),
 			Steps: []resource.TestStep{
 				{
 					Config: config,
@@ -148,8 +148,8 @@ resource "redshift_default_privileges" "user" {
 `, userName, rootUsername)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -256,9 +256,9 @@ func TestAccRedshiftDefaultPrivileges_UpdateToRevoke(t *testing.T) {
 		}
 		`, groupName, userName, rootUsername, roleName)
 		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { testAccPreCheck(t) },
-			ProviderFactories: testAccProviders,
-			CheckDestroy:      testAccCheckDefaultPrivilegesDestory(defaultPrivilegesAllSchemasID, 100, "r", groupName),
+			PreCheck:                 func() { testAccPreCheck(t) },
+			ProtoV6ProviderFactories: testAccProtoV6Providers,
+			CheckDestroy:             testAccCheckDefaultPrivilegesDestory(defaultPrivilegesAllSchemasID, 100, "r", groupName),
 			Steps: []resource.TestStep{
 				{
 					Config: configInitial,
@@ -340,8 +340,8 @@ resource "redshift_default_privileges" "both" {
 }
 `, rootUsername)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
@@ -361,8 +361,8 @@ resource "redshift_default_privileges" "none" {
 }
 `, rootUsername)
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
@@ -374,7 +374,7 @@ resource "redshift_default_privileges" "none" {
 
 func testAccCheckDefaultPrivilegesDestory(schemaID, ownerID int, objectType, groupName string) func(*terraform.State) error {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		for _, rs := range s.RootModule().Resources {
 			if rs.Type != "redshift_default_privileges" {

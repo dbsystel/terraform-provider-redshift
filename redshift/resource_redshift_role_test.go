@@ -8,8 +8,8 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 var (
@@ -36,9 +36,9 @@ func TestAccRedshiftRole_Basic(t *testing.T) {
 	testAccRedshiftRoleConfig := builder.String()
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftRoleDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftRoleDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccRedshiftRoleConfig,
@@ -72,9 +72,9 @@ name = "%s"
 }`, roleNameUpdate)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviders,
-		CheckDestroy:      testAccCheckRedshiftRoleDestroy,
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6Providers,
+		CheckDestroy:             testAccCheckRedshiftRoleDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: configCreate,
@@ -102,7 +102,7 @@ name = "%s"
 }
 
 func testAccCheckRedshiftRoleDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*Client)
+	client := testAccClient()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "redshift_role" {
@@ -125,7 +125,7 @@ func testAccCheckRedshiftRoleDestroy(s *terraform.State) error {
 
 func testAccCheckRedshiftRoleExists(roleName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*Client)
+		client := testAccClient()
 
 		exists, err := checkRoleExists(client, roleName)
 		if err != nil {

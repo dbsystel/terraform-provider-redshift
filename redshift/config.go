@@ -25,6 +25,65 @@ func dsnLock(dsn string) *sync.Mutex {
 	return l
 }
 
+// providerSettings holds the provider-level arguments in a transport-agnostic form,
+// decoupled from how they were read out of the provider configuration. Nested blocks are
+// pointers so that "the block is absent" stays distinguishable from "the block is present
+// with zero values".
+type providerSettings struct {
+	Host              string
+	Username          string
+	Password          string
+	Port              int
+	SSLMode           string
+	Database          string
+	MaxConnections    int
+	ConnectTimeout    int
+	SessionParameters map[string]string
+
+	DataApi              *dataApiSettings
+	TemporaryCredentials *temporaryCredentialsSettings
+}
+
+type dataApiSettings struct {
+	WorkgroupName     string
+	ClusterIdentifier string
+	Username          string
+	Region            string
+}
+
+type temporaryCredentialsSettings struct {
+	ClusterIdentifier string
+	Region            string
+	AutoCreateUser    bool
+	DbGroups          []string
+	DurationSeconds   int
+	AssumeRole        *assumeRoleSettings
+}
+
+type assumeRoleSettings struct {
+	Arn         string
+	ExternalID  string
+	SessionName string
+}
+
+// usesDataApi reports whether the Data API transport is configured. It mirrors the schema
+// requirement that exactly one of workgroup_name and cluster_identifier is set.
+func (s *providerSettings) usesDataApi() bool {
+	return s.DataApi != nil && (s.DataApi.WorkgroupName != "" || s.DataApi.ClusterIdentifier != "")
+}
+
+// newConfig selects the transport and builds the connection configuration for it.
+func (s *providerSettings) newConfig(temporaryCredentialsResolver temporaryCredentialsResolverFunc) (*Config, error) {
+	// Defence-in-depth: ConflictsWith in the schema already prevents this at plan time.
+	if s.usesDataApi() && s.Host != "" {
+		return nil, fmt.Errorf("using both auth methods 'data_api' and 'host' is not allowed")
+	}
+	if s.usesDataApi() {
+		return s.dataApiConfig()
+	}
+	return s.pqConfig(temporaryCredentialsResolver)
+}
+
 type Config struct {
 	DriverName string
 	ConnStr    string

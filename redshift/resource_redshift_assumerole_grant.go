@@ -1,12 +1,21 @@
 package redshift
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/lib/pq"
 )
 
@@ -17,70 +26,132 @@ const (
 	assumeRoleGrantPrivilegesAttr  = "privileges"
 )
 
-func redshiftAssumeRoleGrant() *schema.Resource {
-	return &schema.Resource{
+var (
+	_ resource.Resource                = &assumeRoleGrantResource{}
+	_ resource.ResourceWithConfigure   = &assumeRoleGrantResource{}
+	_ resource.ResourceWithImportState = &assumeRoleGrantResource{}
+)
+
+func newAssumeRoleGrantResource() resource.Resource {
+	return &assumeRoleGrantResource{}
+}
+
+type assumeRoleGrantResource struct {
+	frameworkClient
+}
+
+type assumeRoleGrantResourceModel struct {
+	ID          types.String `tfsdk:"id"`
+	IamRole     types.String `tfsdk:"iam_role"`
+	GrantToType types.String `tfsdk:"grant_to_type"`
+	GrantToName types.String `tfsdk:"grant_to_name"`
+	Privileges  types.Set    `tfsdk:"privileges"`
+}
+
+func (r *assumeRoleGrantResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_assumerole_grant"
+}
+
+func (r *assumeRoleGrantResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		Description: `
 Grants the permission to use an IAM role to a user or a role.
 
 For more information, see [GRANT documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html).
 `,
-		CreateContext: ResourceFunc(ResourceRetryOnPQErrors(resourceRedshiftAssumeRoleGrantCreate)),
-		ReadContext:   ResourceFunc(ResourceRetryOnPQErrors(resourceRedshiftAssumeRoleGrantRead)),
-		DeleteContext: ResourceFunc(ResourceRetryOnPQErrors(resourceRedshiftAssumeRoleGrantDelete)),
-
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
-
-		Schema: map[string]*schema.Schema{
-			assumeRoleGrantRoleNameAttr: {
-				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
-				ValidateFunc: validation.StringNotInSlice([]string{"default", "all"}, true),
-				Description:  "The ARN of the role to be granted. 'default' and 'ALL' cannot be used in this resource.",
-			},
-			assumeRoleGrantGrantToTypeAttr: {
-				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
-				Description:  "The type of principal to grant the role to. Valid values are: 'USER', 'ROLE'.",
-				ValidateFunc: validation.StringInSlice([]string{"USER", "ROLE"}, false),
-			},
-			assumeRoleGrantGrantToNameAttr: {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "The name of the user, or role to grant this role to.",
-			},
-			assumeRoleGrantPrivilegesAttr: {
-				Type:     schema.TypeSet,
-				Required: true,
-				ForceNew: true,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-					StateFunc: func(val interface{}) string {
-						return strings.ToLower(val.(string))
-					},
-					ValidateFunc: validation.StringInSlice([]string{"copy", "unload", "external function", "create model"}, true),
+		Attributes: map[string]schema.Attribute{
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "The assume role grant ID.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
-				Set:         schema.HashString,
+			},
+			assumeRoleGrantRoleNameAttr: schema.StringAttribute{
+				Required:    true,
+				Description: "The ARN of the role to be granted. 'default' and 'ALL' cannot be used in this resource.",
+				Validators: []validator.String{
+					stringvalidator.NoneOfCaseInsensitive("default", "all"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			assumeRoleGrantGrantToTypeAttr: schema.StringAttribute{
+				Required:    true,
+				Description: "The type of principal to grant the role to. Valid values are: 'USER', 'ROLE'.",
+				Validators: []validator.String{
+					stringvalidator.OneOf("USER", "ROLE"),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			assumeRoleGrantGrantToNameAttr: schema.StringAttribute{
+				Required:    true,
+				Description: "The name of the user, or role to grant this role to.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			assumeRoleGrantPrivilegesAttr: schema.SetAttribute{
+				Required:    true,
+				ElementType: types.StringType,
 				Description: "The list of privileges to apply. See [GRANT command documentation](https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html) to see what privileges are available. 'ALL' cannot be used in this resource.",
+				Validators: []validator.Set{
+					setvalidator.ValueStringsAre(
+						stringvalidator.OneOfCaseInsensitive("copy", "unload", "external function", "create model"),
+					),
+				},
+				PlanModifiers: []planmodifier.Set{
+					normalizeSet(strings.ToLower),
+					setplanmodifier.RequiresReplace(),
+				},
 			},
 		},
 	}
 }
 
-func resourceRedshiftAssumeRoleGrantCreate(db *DBConnection, d *schema.ResourceData) error {
-	roleName := d.Get(assumeRoleGrantRoleNameAttr).(string)
-	grantToType := d.Get(assumeRoleGrantGrantToTypeAttr).(string)
-	grantToName := d.Get(assumeRoleGrantGrantToNameAttr).(string)
+func (r *assumeRoleGrantResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.configureResource(req, resp)
+}
 
-	var privileges []string
-	for _, p := range d.Get(assumeRoleGrantPrivilegesAttr).(*schema.Set).List() {
-		privileges = append(privileges, p.(string))
+func (r *assumeRoleGrantResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+func (r *assumeRoleGrantResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var model assumeRoleGrantResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	privileges := stringsFromSet(ctx, model.Privileges, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	roleName, grantToType, grantToName := model.IamRole.ValueString(), model.GrantToType.ValueString(), model.GrantToName.ValueString()
+
+	err := retryOnPQErrors(ctx, func() error {
+		return grantAssumeRole(db, roleName, grantToType, grantToName, privileges)
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to grant assumerole", err.Error())
+		return
+	}
+
+	model.ID = types.StringValue(generateAssumeRoleGrantID(roleName, strings.Join(privileges, ","), grantToType, grantToName))
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+func grantAssumeRole(db *DBConnection, roleName, grantToType, grantToName string, privileges []string) error {
 	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
@@ -90,15 +161,9 @@ func resourceRedshiftAssumeRoleGrantCreate(db *DBConnection, d *schema.ResourceD
 	query := fmt.Sprintf("GRANT ASSUMEROLE ON %s", pq.QuoteLiteral(roleName))
 	switch grantToType {
 	case "USER":
-		query = fmt.Sprintf("%s TO %s",
-			query,
-			pq.QuoteIdentifier(grantToName),
-		)
+		query = fmt.Sprintf("%s TO %s", query, pq.QuoteIdentifier(grantToName))
 	case "ROLE":
-		query = fmt.Sprintf("%s TO ROLE %s",
-			query,
-			pq.QuoteIdentifier(grantToName),
-		)
+		query = fmt.Sprintf("%s TO ROLE %s", query, pq.QuoteIdentifier(grantToName))
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -113,21 +178,24 @@ func resourceRedshiftAssumeRoleGrantCreate(db *DBConnection, d *schema.ResourceD
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
-
-	d.SetId(generateAssumeRoleGrantID(roleName, strings.Join(privileges, ","), grantToType, grantToName))
-
-	return resourceRedshiftAssumeRoleGrantRead(db, d)
+	return nil
 }
 
-func resourceRedshiftAssumeRoleGrantRead(db *DBConnection, d *schema.ResourceData) error {
-	roleName := d.Get(assumeRoleGrantRoleNameAttr).(string)
-	grantToType := d.Get(assumeRoleGrantGrantToTypeAttr).(string)
-	grantToName := d.Get(assumeRoleGrantGrantToNameAttr).(string)
+func (r *assumeRoleGrantResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var model assumeRoleGrantResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	var query string
-	var copy, unload, externalFunction, createModel bool
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
 
-	query = `
+	roleName, grantToType, grantToName := model.IamRole.ValueString(), model.GrantToType.ValueString(), model.GrantToName.ValueString()
+
+	query := `
 		SELECT
 			COALESCE(MAX(CASE WHEN command_type = 'COPY' THEN 1 ELSE 0 END), 0),
 			COALESCE(MAX(CASE WHEN command_type = 'UNLOAD' THEN 1 ELSE 0 END), 0),
@@ -141,37 +209,69 @@ func resourceRedshiftAssumeRoleGrantRead(db *DBConnection, d *schema.ResourceDat
 
 	log.Printf("[DEBUG] %s, $1=%s, $2=%s\n", query, roleName, grantToName)
 
-	err := db.QueryRow(query, roleName, grantToName, grantToType).Scan(&copy, &unload, &externalFunction, &createModel)
+	var copyPrivilege, unload, externalFunction, createModel bool
+	err := retryOnPQErrors(ctx, func() error {
+		return db.QueryRow(query, roleName, grantToName, grantToType).Scan(&copyPrivilege, &unload, &externalFunction, &createModel)
+	})
 	if err != nil {
-		return fmt.Errorf("failed to collect privileges: %w", err)
+		resp.Diagnostics.AddError("Unable to read the assume role grant", fmt.Sprintf("failed to collect privileges: %s", err))
+		return
 	}
 
 	var privileges []string
-	appendIfTrue(copy, "copy", &privileges)
+	appendIfTrue(copyPrivilege, "copy", &privileges)
 	appendIfTrue(unload, "unload", &privileges)
 	appendIfTrue(externalFunction, "external function", &privileges)
 	appendIfTrue(createModel, "create model", &privileges)
 
 	if len(privileges) == 0 {
 		log.Printf("[WARN] Assume role grant for %s to %s %s not found, removing from state", roleName, grantToType, grantToName)
-		d.SetId("")
-		return nil
+		resp.State.RemoveResource(ctx)
+		return
 	}
 
-	d.Set(assumeRoleGrantPrivilegesAttr, privileges)
+	grantedPrivileges, diags := types.SetValueFrom(ctx, types.StringType, privileges)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
-	return nil
+	model.Privileges = grantedPrivileges
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
-func resourceRedshiftAssumeRoleGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	roleName := d.Get(assumeRoleGrantRoleNameAttr).(string)
-	grantToType := d.Get(assumeRoleGrantGrantToTypeAttr).(string)
-	grantToName := d.Get(assumeRoleGrantGrantToNameAttr).(string)
-	var privileges []string
-	for _, p := range d.Get(assumeRoleGrantPrivilegesAttr).(*schema.Set).List() {
-		privileges = append(privileges, p.(string))
+// Update is never called: every argument requires replacement.
+func (r *assumeRoleGrantResource) Update(_ context.Context, _ resource.UpdateRequest, _ *resource.UpdateResponse) {
+}
+
+func (r *assumeRoleGrantResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var model assumeRoleGrantResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &model)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
+	db := r.connect(&resp.Diagnostics)
+	if db == nil {
+		return
+	}
+
+	privileges := stringsFromSet(ctx, model.Privileges, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	roleName, grantToType, grantToName := model.IamRole.ValueString(), model.GrantToType.ValueString(), model.GrantToName.ValueString()
+
+	err := retryOnPQErrors(ctx, func() error {
+		return revokeAssumeRole(db, roleName, grantToType, grantToName, privileges)
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to revoke assumerole", err.Error())
+	}
+}
+
+func revokeAssumeRole(db *DBConnection, roleName, grantToType, grantToName string, privileges []string) error {
 	tx, err := startTransaction(db.client)
 	if err != nil {
 		return err
@@ -181,15 +281,9 @@ func resourceRedshiftAssumeRoleGrantDelete(db *DBConnection, d *schema.ResourceD
 	query := fmt.Sprintf("REVOKE ASSUMEROLE ON %s", pq.QuoteLiteral(roleName))
 	switch grantToType {
 	case "USER":
-		query = fmt.Sprintf("%s FROM %s",
-			query,
-			pq.QuoteIdentifier(grantToName),
-		)
+		query = fmt.Sprintf("%s FROM %s", query, pq.QuoteIdentifier(grantToName))
 	case "ROLE":
-		query = fmt.Sprintf("%s FROM ROLE %s",
-			query,
-			pq.QuoteIdentifier(grantToName),
-		)
+		query = fmt.Sprintf("%s FROM ROLE %s", query, pq.QuoteIdentifier(grantToName))
 	default:
 		return fmt.Errorf("unsupported grant_to_type: %s", grantToType)
 	}
@@ -213,7 +307,6 @@ func resourceRedshiftAssumeRoleGrantDelete(db *DBConnection, d *schema.ResourceD
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("could not commit transaction: %w", err)
 	}
-
 	return nil
 }
 

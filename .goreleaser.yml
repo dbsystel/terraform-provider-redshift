@@ -59,5 +59,7 @@ release:
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
   # If you want to manually examine the release before its live, uncomment this line:
   draft: true
+  # Flag releases whose tag carries a prerelease identifier (v1.2.0-rc.1) as such.
+  prerelease: auto
 changelog:
   disable: true
