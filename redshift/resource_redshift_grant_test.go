@@ -1321,6 +1321,72 @@ func TestAccRedshiftGrant_AllTables_Public(t *testing.T) {
 	})
 }
 
+func TestAccRedshiftGrant_DeleteMissingSchema(t *testing.T) {
+	anchorGroup := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_group_anchor"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_deleted"), "-", "_")
+	grantConfig := testAccRedshiftGrantGroupConfig(anchorGroup) + fmt.Sprintf(`
+resource "redshift_grant" "schema" {
+  group       = "public"
+  schema      = %[1]q
+  object_type = "schema"
+  privileges  = ["usage"]
+}
+
+resource "redshift_grant" "all_tables" {
+  group       = "public"
+  schema      = %[1]q
+  object_type = "table"
+  objects     = []
+  privileges  = ["select"]
+}
+`, schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantGroupConfig(anchorGroup),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a")
+					})
+				},
+				Config: grantConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.schema", "schema", schemaName),
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "schema", schemaName),
+				),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", pq.QuoteIdentifier(schemaName)))
+						return err
+					})
+				},
+				Config: testAccRedshiftGrantGroupConfig(anchorGroup),
+				Check: resource.ComposeTestCheckFunc(
+					testAccRedshiftGrantResourceRemoved("redshift_grant.schema"),
+					testAccRedshiftGrantResourceRemoved("redshift_grant.all_tables"),
+				),
+			},
+		},
+	})
+}
+
+func testAccRedshiftGrantResourceRemoved(address string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		if _, found := state.RootModule().Resources[address]; found {
+			return fmt.Errorf("%s remains in Terraform state", address)
+		}
+		return nil
+	}
+}
+
 func testAccRedshiftGrantGroupConfig(group string) string {
 	return fmt.Sprintf(`
 resource "redshift_group" "grantee" {
