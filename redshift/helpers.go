@@ -82,10 +82,15 @@ func ResourceFunc(fn func(*DBConnection, *schema.ResourceData) error) func(conte
 	}
 }
 
+// ResourceRetryOnPQErrors retries operations that fail with retryable
+// PostgreSQL errors up to ten times, returning the final error if all
+// attempts fail.
 func ResourceRetryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error) func(*DBConnection, *schema.ResourceData) error {
 	return retryOnPQErrors(fn, time.Sleep)
 }
 
+// retryOnPQErrors uses the supplied sleep function so retry behavior can be
+// tested without waiting.
 func retryOnPQErrors(fn func(*DBConnection, *schema.ResourceData) error, sleep func(time.Duration)) func(*DBConnection, *schema.ResourceData) error {
 	return func(db *DBConnection, d *schema.ResourceData) error {
 		var lastErr error
