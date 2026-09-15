@@ -2,6 +2,7 @@ package redshift
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -195,23 +196,11 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGrantDelete(db *DBConnection, d *schema.ResourceData) error {
-	tx, err := startTransaction(db.client)
-	if err != nil {
-		return err
-	}
-	defer deferredRollback(tx)
-
-	databaseName := getDatabaseName(db, d)
-
-	if err := revokeGrants(tx, databaseName, d); err != nil {
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("could not commit transaction: %w", err)
-	}
-
-	return nil
+	return revokeGrantsForDelete(
+		db,
+		db.client.config.DriverName,
+		createGrantsDeleteRevokeStatements(d, getDatabaseName(db, d)),
+	)
 }
 
 func resourceRedshiftGrantRead(db *DBConnection, d *schema.ResourceData) error {
@@ -743,6 +732,142 @@ func revokeGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error
 	return err
 }
 
+type grantRevokeExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+type grantRevokeTarget struct {
+	objectType string
+	name       string
+	named      bool
+}
+
+type grantRevokeStatement struct {
+	query  string
+	target grantRevokeTarget
+}
+
+func (t grantRevokeTarget) description() string {
+	if t.name == "" {
+		return t.objectType
+	}
+	if t.named {
+		return fmt.Sprintf("named %s %q", t.objectType, t.name)
+	}
+	return fmt.Sprintf("%s %q", t.objectType, t.name)
+}
+
+// revokeGrantsForDelete executes independent REVOKE statements so one missing
+// named target cannot prevent cleanup of grants on the remaining targets.
+func revokeGrantsForDelete(executor grantRevokeExecutor, driverName string, statements []grantRevokeStatement) error {
+	var errs []error
+	for _, statement := range statements {
+		_, err := executor.Exec(statement.query)
+		if err == nil || isMissingGrantParticipantError(err, driverName, statement) {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("could not revoke %s grant: %w", statement.target.description(), err))
+	}
+	return errors.Join(errs...)
+}
+
+func createGrantsDeleteRevokeStatements(d *schema.ResourceData, databaseName string) []grantRevokeStatement {
+	objectType := d.Get(grantObjectTypeAttr).(string)
+	objects := d.Get(grantObjectsAttr).(*schema.Set)
+	target := grantRevokeTarget{objectType: objectType, name: grantRevokeTargetName(d, databaseName)}
+
+	if objectType == "database" || objectType == "schema" || objects.Len() == 0 {
+		return []grantRevokeStatement{{
+			query:  createGrantsRevokeQuery(d, databaseName),
+			target: target,
+		}}
+	}
+
+	statements := make([]grantRevokeStatement, 0, objects.Len())
+	for _, object := range objects.List() {
+		individualObjects := schema.NewSet(schema.HashString, []interface{}{object})
+		statements = append(statements, grantRevokeStatement{
+			query:  createGrantsRevokeQueryForObjects(d, databaseName, individualObjects),
+			target: grantRevokeTarget{objectType: objectType, name: object.(string), named: true},
+		})
+	}
+	return statements
+}
+
+func grantRevokeTargetName(d *schema.ResourceData, databaseName string) string {
+	if d.Get(grantObjectTypeAttr).(string) == "database" {
+		return databaseName
+	}
+	return d.Get(grantSchemaAttr).(string)
+}
+
+func isMissingGrantParticipantError(err error, driverName string, statement grantRevokeStatement) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return isMissingGrantParticipantPQError(string(pqErr.Code), statement.target)
+	}
+
+	if driverName != redshiftDataDriverName {
+		return false
+	}
+
+	prefix := fmt.Sprintf("query failed (sql: %q): ", statement.query)
+	payload, ok := strings.CutPrefix(err.Error(), prefix)
+	return ok && isMissingGrantParticipantDataAPIError(payload, statement.target)
+}
+
+func isMissingGrantParticipantPQError(code string, target grantRevokeTarget) bool {
+	// 42704 is used by Redshift for undefined principals and objects such as
+	// languages. It is valid for every grant target because any grantee can be
+	// absent.
+	if code == "42704" {
+		return true
+	}
+
+	switch target.objectType {
+	case "database":
+		return code == "3D000"
+	case "schema":
+		return code == pqErrorCodeInvalidSchemaName
+	case "table":
+		return code == pqErrorCodeInvalidSchemaName || (target.named && code == "42P01")
+	case "function", "procedure":
+		return code == pqErrorCodeInvalidSchemaName || (target.named && code == "42883")
+	default:
+		return false
+	}
+}
+
+var (
+	dataAPIAbsentPrincipalError = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?(?:user|group|role) "[^"]+" does not exist\.?$`)
+	dataAPIAbsentDatabaseError  = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?database "[^"]+" does not exist\.?$`)
+	dataAPIAbsentSchemaError    = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?schema "[^"]+" does not exist\.?$`)
+	dataAPIAbsentRelationError  = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?relation "[^"]+" does not exist\.?$`)
+	dataAPIAbsentCallableError  = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?(?:function|procedure) .+ does not exist\.?$`)
+	dataAPIAbsentLanguageError  = regexp.MustCompile(`(?i)^(?:ERROR:\s*)?language "[^"]+" does not exist\.?$`)
+)
+
+func isMissingGrantParticipantDataAPIError(payload string, target grantRevokeTarget) bool {
+	if dataAPIAbsentPrincipalError.MatchString(payload) {
+		return true
+	}
+
+	switch target.objectType {
+	case "database":
+		return dataAPIAbsentDatabaseError.MatchString(payload)
+	case "schema":
+		return dataAPIAbsentSchemaError.MatchString(payload)
+	case "table":
+		return dataAPIAbsentSchemaError.MatchString(payload) || (target.named && dataAPIAbsentRelationError.MatchString(payload))
+	case "function", "procedure":
+		return dataAPIAbsentSchemaError.MatchString(payload) || (target.named && dataAPIAbsentCallableError.MatchString(payload))
+	case "language":
+		return dataAPIAbsentLanguageError.MatchString(payload)
+	default:
+		return false
+	}
+}
+
 func createGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error {
 	if d.Get(grantPrivilegesAttr).(*schema.Set).Len() == 0 {
 		log.Printf("[DEBUG] no privileges to grant for %s", d.Get(grantGroupAttr).(string))
@@ -755,6 +880,10 @@ func createGrants(tx *sql.Tx, databaseName string, d *schema.ResourceData) error
 }
 
 func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string {
+	return createGrantsRevokeQueryForObjects(d, databaseName, d.Get(grantObjectsAttr).(*schema.Set))
+}
+
+func createGrantsRevokeQueryForObjects(d *schema.ResourceData, databaseName string, objects *schema.Set) string {
 	var query, toWhomIndicator, entityName string
 
 	if groupName, isGroup := d.GetOk(grantGroupAttr); isGroup {
@@ -789,7 +918,6 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			fromEntityName,
 		)
 	case "TABLE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
 		if objects.Len() > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
@@ -808,7 +936,6 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			)
 		}
 	case "FUNCTION", "PROCEDURE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
 		if objects.Len() > 0 {
 			query = fmt.Sprintf(
 				"REVOKE ALL PRIVILEGES ON %s %s FROM %s %s",
@@ -827,7 +954,6 @@ func createGrantsRevokeQuery(d *schema.ResourceData, databaseName string) string
 			)
 		}
 	case "LANGUAGE":
-		objects := d.Get(grantObjectsAttr).(*schema.Set)
 		query = fmt.Sprintf(
 			"REVOKE USAGE ON LANGUAGE %s FROM %s %s",
 			setToPgIdentList(objects, ""),
