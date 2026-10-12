@@ -807,7 +807,7 @@ func grantRevokeTargetName(d *schema.ResourceData, databaseName string) string {
 func isMissingGrantParticipantError(err error, driverName string, statement grantRevokeStatement) bool {
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) {
-		return isMissingGrantParticipantPQError(string(pqErr.Code), statement.target)
+		return isMissingGrantParticipantPQError(string(pqErr.Code), pqErr.Message, statement.target)
 	}
 
 	if driverName != redshiftDataDriverName {
@@ -819,12 +819,13 @@ func isMissingGrantParticipantError(err error, driverName string, statement gran
 	return ok && isMissingGrantParticipantDataAPIError(payload, statement.target)
 }
 
-func isMissingGrantParticipantPQError(code string, target grantRevokeTarget) bool {
-	// 42704 is used by Redshift for undefined principals and objects such as
-	// languages. It is valid for every grant target because any grantee can be
-	// absent.
+func isMissingGrantParticipantPQError(code, message string, target grantRevokeTarget) bool {
+	// 42704 (undefined_object) also covers unrelated errors such as an unknown
+	// type in a function signature, so only accept it for an absent grantee or
+	// an absent language.
 	if code == "42704" {
-		return true
+		return dataAPIAbsentPrincipalError.MatchString(message) ||
+			(target.objectType == "language" && dataAPIAbsentLanguageError.MatchString(message))
 	}
 
 	switch target.objectType {

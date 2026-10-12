@@ -47,28 +47,34 @@ func testGrantResourceData(t *testing.T, objectType string, objects []string) *s
 
 func TestIsMissingGrantParticipantPQError(t *testing.T) {
 	tests := []struct {
-		name   string
-		code   string
-		target grantRevokeTarget
-		want   bool
+		name    string
+		code    string
+		message string
+		target  grantRevokeTarget
+		want    bool
 	}{
-		{"database", "3D000", grantRevokeTarget{objectType: "database"}, true},
-		{"schema", "3F000", grantRevokeTarget{objectType: "schema"}, true},
-		{"all tables schema", "3F000", grantRevokeTarget{objectType: "table"}, true},
-		{"named table", "42P01", grantRevokeTarget{objectType: "table", named: true}, true},
-		{"named function", "42883", grantRevokeTarget{objectType: "function", named: true}, true},
-		{"named procedure", "42883", grantRevokeTarget{objectType: "procedure", named: true}, true},
-		{"language", "42704", grantRevokeTarget{objectType: "language", named: true}, true},
-		{"missing principal", "42704", grantRevokeTarget{objectType: "database"}, true},
-		{"database code on schema", "3D000", grantRevokeTarget{objectType: "schema"}, false},
-		{"relation code on all tables", "42P01", grantRevokeTarget{objectType: "table"}, false},
-		{"function code on table", "42883", grantRevokeTarget{objectType: "table", named: true}, false},
-		{"permission denied", "42501", grantRevokeTarget{objectType: "schema"}, false},
+		{"database", "3D000", "", grantRevokeTarget{objectType: "database"}, true},
+		{"schema", "3F000", "", grantRevokeTarget{objectType: "schema"}, true},
+		{"all tables schema", "3F000", "", grantRevokeTarget{objectType: "table"}, true},
+		{"named table", "42P01", "", grantRevokeTarget{objectType: "table", named: true}, true},
+		{"named function", "42883", "", grantRevokeTarget{objectType: "function", named: true}, true},
+		{"named procedure", "42883", "", grantRevokeTarget{objectType: "procedure", named: true}, true},
+		{"language", "42704", `language "plpythonu" does not exist`, grantRevokeTarget{objectType: "language", named: true}, true},
+		{"missing user", "42704", `user "bob" does not exist`, grantRevokeTarget{objectType: "database"}, true},
+		{"missing group", "42704", `group "analysts" does not exist`, grantRevokeTarget{objectType: "table", named: true}, true},
+		{"missing role", "42704", `role "reader" does not exist`, grantRevokeTarget{objectType: "schema"}, true},
+		{"language message on schema", "42704", `language "plpythonu" does not exist`, grantRevokeTarget{objectType: "schema"}, false},
+		{"unknown type", "42704", `type "bad_type" does not exist`, grantRevokeTarget{objectType: "function", named: true}, false},
+		{"undefined object without message", "42704", "", grantRevokeTarget{objectType: "database"}, false},
+		{"database code on schema", "3D000", "", grantRevokeTarget{objectType: "schema"}, false},
+		{"relation code on all tables", "42P01", "", grantRevokeTarget{objectType: "table"}, false},
+		{"function code on table", "42883", "", grantRevokeTarget{objectType: "table", named: true}, false},
+		{"permission denied", "42501", "", grantRevokeTarget{objectType: "schema"}, false},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := fmt.Errorf("revoke: %w", &pq.Error{Code: pq.ErrorCode(test.code)})
+			err := fmt.Errorf("revoke: %w", &pq.Error{Code: pq.ErrorCode(test.code), Message: test.message})
 			statement := grantRevokeStatement{query: "REVOKE", target: test.target}
 			if got := isMissingGrantParticipantError(err, "postgres", statement); got != test.want {
 				t.Fatalf("isMissingGrantParticipantError() = %v, want %v", got, test.want)
