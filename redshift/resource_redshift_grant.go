@@ -196,6 +196,9 @@ func resourceRedshiftGrantCreate(db *DBConnection, d *schema.ResourceData) error
 }
 
 func resourceRedshiftGrantDelete(db *DBConnection, d *schema.ResourceData) error {
+	// A missing target aborts a TCP transaction, blocking revokes on surviving
+	// targets. Use autocommit for deletion: successful revokes remain applied,
+	// while unexpected errors keep the resource in state for a later retry.
 	return revokeGrantsForDelete(
 		db,
 		db.client.config.DriverName,
