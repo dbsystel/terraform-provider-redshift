@@ -1321,6 +1321,142 @@ func TestAccRedshiftGrant_AllTables_Public(t *testing.T) {
 	})
 }
 
+func TestAccRedshiftGrant_DeleteMissingSchema(t *testing.T) {
+	anchorGroup := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_group_anchor"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_deleted"), "-", "_")
+	grantConfig := testAccRedshiftGrantGroupConfig(anchorGroup) + fmt.Sprintf(`
+resource "redshift_grant" "schema" {
+  group       = "public"
+  schema      = %[1]q
+  object_type = "schema"
+  privileges  = ["usage"]
+}
+
+resource "redshift_grant" "all_tables" {
+  group       = "public"
+  schema      = %[1]q
+  object_type = "table"
+  objects     = []
+  privileges  = ["select"]
+}
+`, schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantGroupConfig(anchorGroup),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a")
+					})
+				},
+				Config: grantConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.schema", "schema", schemaName),
+					resource.TestCheckResourceAttr("redshift_grant.all_tables", "schema", schemaName),
+				),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE", pq.QuoteIdentifier(schemaName)))
+						return err
+					})
+				},
+				Config: testAccRedshiftGrantGroupConfig(anchorGroup),
+				Check: resource.ComposeTestCheckFunc(
+					testAccRedshiftGrantResourceRemoved("redshift_grant.schema"),
+					testAccRedshiftGrantResourceRemoved("redshift_grant.all_tables"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccRedshiftGrant_DeleteMissingNamedTable(t *testing.T) {
+	userName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_user_deleted_table"), "-", "_")
+	schemaName := strings.ReplaceAll(acctest.RandomWithPrefix("tf_acc_schema_deleted_table"), "-", "_")
+	// Drop the first target in revoke order to ensure cleanup continues after the error.
+	objects := tfschema.NewSet(tfschema.HashString, []interface{}{"table_a", "table_b"}).List()
+	missingTable, survivingTable := objects[0].(string), objects[1].(string)
+	grantConfig := testAccRedshiftGrantUserConfig(userName) + fmt.Sprintf(`
+resource "redshift_grant" "named_tables" {
+  user        = redshift_user.grantee.name
+  schema      = %[1]q
+  object_type = "table"
+  objects     = ["table_a", "table_b"]
+  privileges  = ["select"]
+}
+`, schemaName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccRedshiftGrantDropSchema(schemaName),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRedshiftGrantUserConfig(userName),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						return testAccRedshiftGrantCreateSchemaTables(db, schemaName, "table_a", "table_b")
+					})
+				},
+				Config: grantConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_grant.named_tables", "objects.#", "2"),
+					testAccCheckUserTablePrivilege(schemaName, missingTable, userName, "select", true),
+					testAccCheckUserTablePrivilege(schemaName, survivingTable, userName, "select", true),
+				),
+			},
+			{
+				PreConfig: func() {
+					withAccGrantConn(t, func(db *DBConnection) error {
+						_, err := db.Exec(fmt.Sprintf("DROP TABLE %s.%s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(missingTable)))
+						return err
+					})
+				},
+				Config: testAccRedshiftGrantUserConfig(userName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccRedshiftGrantResourceRemoved("redshift_grant.named_tables"),
+					testAccCheckUserTablePrivilege(schemaName, survivingTable, userName, "select", false),
+					func(*terraform.State) error {
+						dbClient := testAccProvider.Meta().(*Client)
+						conn, err := dbClient.Connect()
+						if err != nil {
+							return fmt.Errorf("couldn't connect to redshift: %w", err)
+						}
+						defer dbClient.Close()
+
+						// Ensure the privilege disappeared because it was revoked, not because the table was dropped.
+						var count int
+						query := fmt.Sprintf("SELECT COUNT(*) FROM %s.%s", pq.QuoteIdentifier(schemaName), pq.QuoteIdentifier(survivingTable))
+						if err := conn.QueryRow(query).Scan(&count); err != nil {
+							return fmt.Errorf("couldn't read surviving table: %w", err)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func testAccRedshiftGrantResourceRemoved(address string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		if _, found := state.RootModule().Resources[address]; found {
+			return fmt.Errorf("%s remains in Terraform state", address)
+		}
+		return nil
+	}
+}
+
 func testAccRedshiftGrantGroupConfig(group string) string {
 	return fmt.Sprintf(`
 resource "redshift_group" "grantee" {
