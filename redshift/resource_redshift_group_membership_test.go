@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
@@ -67,6 +68,48 @@ resource "redshift_user" "simple" {
 				Config: updateConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckRedshiftGroupMembershipPresence(groupName, userName, false),
+				),
+			},
+		},
+	})
+}
+
+// TestAccRedshiftGroupMembership_IAMRUser is a regression test for
+// https://github.com/dbsystel/terraform-provider-redshift/issues/178.
+func TestAccRedshiftGroupMembership_IAMRUser(t *testing.T) {
+	groupName := generateRandomObjectName("tf_acc_group_membership")
+	userName := "IAMR:" + strings.ToUpper(generateRandomObjectName("tf_acc_group_membership_iamr_user"))
+	config := fmt.Sprintf(`
+resource "redshift_group" "simple" {
+  name = %[1]q
+
+  lifecycle {
+    ignore_changes = [
+      users
+    ]
+  }
+}
+
+resource "redshift_user" "simple" {
+  name = %[2]q
+}
+
+resource "redshift_group_membership" "simple" {
+  name = redshift_group.simple.name
+  users = [redshift_user.simple.name]
+}
+`, groupName, userName)
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviders,
+		CheckDestroy:      testAccCheckRedshiftGroupMembershipDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("redshift_group_membership.simple", "name", groupName),
+					resource.TestCheckResourceAttr("redshift_group_membership.simple", "users.0", userName),
+					testAccCheckRedshiftGroupMembershipPresence(groupName, userName, true),
 				),
 			},
 		},
