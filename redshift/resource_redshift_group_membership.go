@@ -182,11 +182,11 @@ func parseUserNames(rawUserNames interface{}) []string {
 func buildUserStringArray(userNames []string, encodeAsLiteral bool) string {
 	var userNamesSafe []string
 	for _, userName := range userNames {
-		encodedUserName := strings.ToLower(userName)
+		var encodedUserName string
 		if encodeAsLiteral {
-			encodedUserName = pq.QuoteLiteral(encodedUserName)
+			encodedUserName = pq.QuoteLiteral(userName)
 		} else {
-			encodedUserName = pq.QuoteIdentifier(encodedUserName)
+			encodedUserName = pq.QuoteIdentifier(userName)
 		}
 		userNamesSafe = append(userNamesSafe, encodedUserName)
 	}
